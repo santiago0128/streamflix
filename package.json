@@ -1,0 +1,22 @@
+{
+  "name": "streamflix",
+  "version": "0.1.0",
+  "description": "Plataforma de streaming — maqueta (SQL Server + Express + SPA)",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "db:init": "node server/db/init.js",
+    "db:anime": "node server/db/import-anime.js",
+    "db:verify": "node server/db/verify-content.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "hls.js": "^1.6.16",
+    "jsonwebtoken": "^9.0.2",
+    "mssql": "^9.1.1"
+  }
+}

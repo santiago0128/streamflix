@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StreamFlix</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="preconnect" href="https://commondatastorage.googleapis.com" />
+</head>
+<body>
+  <!-- ===================== NAVBAR ===================== -->
+  <header class="navbar" id="navbar">
+    <div class="nav-left">
+      <a href="#" class="logo" data-view="home">STREAM<span>FLIX</span></a>
+      <nav class="nav-links">
+        <a href="#" data-view="home" class="active">Inicio</a>
+        <a href="#" data-view="mylist" data-auth-only>Mi Lista</a>
+      </nav>
+    </div>
+    <div class="nav-right">
+      <div class="search-box">
+        <input type="search" id="searchInput" placeholder="Buscar series..." autocomplete="off" />
+        <select id="genreFilter" aria-label="Filtrar por género">
+          <option value="">Todos los géneros</option>
+        </select>
+      </div>
+      <div id="authArea" class="auth-area">
+        <button class="btn btn-ghost" id="loginBtn">Iniciar sesión</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===================== HERO ===================== -->
+  <section class="hero" id="hero" hidden>
+    <div class="hero-bg" id="heroBg"></div>
+    <div class="hero-overlay"></div>
+    <div class="hero-content">
+      <h1 id="heroTitle"></h1>
+      <p id="heroMeta" class="hero-meta"></p>
+      <p id="heroDesc" class="hero-desc"></p>
+      <div class="hero-actions">
+        <button class="btn btn-primary" id="heroPlay">▶ Reproducir</button>
+        <button class="btn btn-secondary" id="heroInfo">Más información</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== CATÁLOGO ===================== -->
+  <main class="content">
+    <h2 class="section-title" id="sectionTitle">Series</h2>
+    <div class="grid" id="grid"></div>
+    <p class="empty" id="emptyState" hidden>No se encontraron resultados.</p>
+  </main>
+
+  <!-- ===================== MODAL DETALLE SERIE ===================== -->
+  <div class="modal" id="detailModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card detail-card">
+      <button class="modal-close" data-close aria-label="Cerrar">✕</button>
+      <div class="detail-hero">
+        <div class="detail-hero-bg" id="detailBg"></div>
+        <div class="detail-hero-fade"></div>
+        <div class="detail-hero-info">
+          <h2 id="detailTitle"></h2>
+          <p id="detailMeta" class="detail-meta"></p>
+          <div class="detail-actions">
+            <button class="btn btn-primary" id="detailPlay">▶ Reproducir</button>
+            <button class="btn btn-secondary" id="detailListBtn">+ Mi Lista</button>
+          </div>
+        </div>
+      </div>
+      <div class="detail-body">
+        <p id="detailDesc" class="detail-desc"></p>
+        <div class="season-select">
+          <label for="seasonSelect">Temporada:</label>
+          <select id="seasonSelect"></select>
+        </div>
+        <div class="episode-list" id="episodeList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== REPRODUCTOR ===================== -->
+  <div class="player-overlay" id="playerOverlay" hidden>
+    <button class="player-close" id="playerClose" aria-label="Cerrar">✕</button>
+    <div class="player-stage" id="playerStage">
+      <video id="video" playsinline></video>
+      <!-- Reproductores de terceros (Provider = 'embed'): no controlamos la
+           reproducción, así que los controles propios se ocultan. -->
+      <iframe id="videoEmbed" class="player-embed" hidden
+              allow="autoplay; fullscreen; encrypted-media"
+              allowfullscreen referrerpolicy="no-referrer"></iframe>
+
+      <!-- Botones contextuales -->
+      <button class="skip-btn" id="skipIntroBtn" hidden>Saltar intro ⏭</button>
+      <button class="skip-btn next-ep" id="nextEpBtn" hidden>Siguiente episodio ▶</button>
+
+      <!-- Controles -->
+      <div class="player-controls" id="playerControls">
+        <div class="progress" id="progress">
+          <div class="progress-buffer" id="progressBuffer"></div>
+          <div class="progress-played" id="progressPlayed"></div>
+          <div class="progress-marker intro" id="introMarker"></div>
+        </div>
+        <div class="controls-row">
+          <button class="ctrl" id="btnPlay" aria-label="Reproducir/Pausar">▶</button>
+          <button class="ctrl" id="btnPrev" aria-label="Anterior" title="Episodio anterior">⏮</button>
+          <button class="ctrl" id="btnNext" aria-label="Siguiente" title="Episodio siguiente">⏭</button>
+          <span class="time" id="timeLabel">0:00 / 0:00</span>
+          <div class="ctrl-spacer"></div>
+          <select class="ep-quick-select" id="epQuickSelect" title="Cambiar de capítulo"></select>
+          <div class="volume">
+            <button class="ctrl" id="btnMute" aria-label="Silenciar">🔊</button>
+            <input type="range" id="volume" min="0" max="1" step="0.05" value="1" />
+          </div>
+          <button class="ctrl" id="btnFs" aria-label="Pantalla completa">⛶</button>
+        </div>
+      </div>
+
+      <div class="player-title" id="playerTitle"></div>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL AUTH ===================== -->
+  <div class="modal" id="authModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card auth-card">
+      <button class="modal-close" data-close aria-label="Cerrar">✕</button>
+      <h2 id="authTitle">Iniciar sesión</h2>
+      <form id="authForm">
+        <div class="field" id="usernameField" hidden>
+          <label>Usuario</label>
+          <input type="text" id="authUsername" autocomplete="username" />
+        </div>
+        <div class="field" id="emailField" hidden>
+          <label>Email</label>
+          <input type="email" id="authEmail" autocomplete="email" />
+        </div>
+        <div class="field">
+          <label id="identifierLabel">Email o usuario</label>
+          <input type="text" id="authIdentifier" autocomplete="username" />
+        </div>
+        <div class="field">
+          <label>Contraseña</label>
+          <input type="password" id="authPassword" autocomplete="current-password" />
+        </div>
+        <p class="auth-error" id="authError" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block" id="authSubmit">Entrar</button>
+      </form>
+      <p class="auth-switch">
+        <span id="authSwitchText">¿No tienes cuenta?</span>
+        <a href="#" id="authSwitchLink">Regístrate</a>
+      </p>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/vendor/hls/hls.min.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/player.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
