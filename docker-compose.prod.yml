@@ -48,5 +48,25 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Bot de Telegram: avisa cuando termina una importación y permite lanzarlas
+  # desde el móvil. Usa long polling, así que no expone ningún puerto ni
+  # necesita dominio ni HTTPS.
+  telegram:
+    image: streamflix-bot
+    container_name: streamflix-telegram
+    command: telegram_bot.js
+    environment:
+      STREAMFLIX_ROOT: /streamflix
+      JK_NO_BROWSER: "1"
+    volumes:
+      - ./.env:/streamflix/.env:ro
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    restart: unless-stopped
+    # El bot lanza importaciones, que son decenas de descargas: sin tope puede
+    # competir por memoria con la base.
+    mem_limit: 512m
+
 volumes:
   streamflix-data:
