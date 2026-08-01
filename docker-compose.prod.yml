@@ -58,8 +58,13 @@ services:
     environment:
       STREAMFLIX_ROOT: /streamflix
       JK_NO_BROWSER: "1"
+      # Carpeta compartida: el importador deja aquí por dónde va, y el bot lo
+      # lee para /estado y para avisar al terminar, aunque la carga la haya
+      # lanzado el cron en otro contenedor.
+      STREAMFLIX_PROGRESS_FILE: /estado/progreso.json
     volumes:
       - ./.env:/streamflix/.env:ro
+      - /opt/streamflix/estado:/estado
     depends_on:
       sqlserver:
         condition: service_healthy
