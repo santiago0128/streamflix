@@ -14,12 +14,21 @@
       <a href="#" class="logo" data-view="home">STREAM<span>FLIX</span></a>
       <nav class="nav-links">
         <a href="#" data-view="home" class="active">Inicio</a>
+        <a href="#" data-type="anime">Animes</a>
+        <a href="#" data-type="series">Series</a>
+        <a href="#" data-type="movie">Películas</a>
         <a href="#" data-view="mylist" data-auth-only>Mi Lista</a>
       </nav>
     </div>
     <div class="nav-right">
       <div class="search-box">
-        <input type="search" id="searchInput" placeholder="Buscar series..." autocomplete="off" />
+        <input type="search" id="searchInput" placeholder="Buscar contenido..." autocomplete="off" />
+        <select id="contentTypeFilter" aria-label="Filtrar por tipo">
+          <option value="">Todo</option>
+          <option value="anime">Anime</option>
+          <option value="series">Series</option>
+          <option value="movie">Películas</option>
+        </select>
         <select id="genreFilter" aria-label="Filtrar por género">
           <option value="">Todos los géneros</option>
         </select>
@@ -48,11 +57,14 @@
   <!-- ===================== CATÁLOGO ===================== -->
   <main class="content">
     <h2 class="section-title" id="sectionTitle">Series</h2>
+    <!-- Una sola rejilla cuando hay filtro o búsqueda; en el inicio se usan las
+         secciones por tipo de abajo para no mezclar anime, series y películas. -->
     <div class="grid" id="grid"></div>
+    <div id="sections"></div>
     <p class="empty" id="emptyState" hidden>No se encontraron resultados.</p>
   </main>
 
-  <!-- ===================== MODAL DETALLE SERIE ===================== -->
+  <!-- ===================== MODAL DETALLE CONTENIDO ===================== -->
   <div class="modal" id="detailModal" hidden>
     <div class="modal-backdrop" data-close></div>
     <div class="modal-card detail-card">
@@ -71,7 +83,7 @@
       </div>
       <div class="detail-body">
         <p id="detailDesc" class="detail-desc"></p>
-        <div class="season-select">
+        <div class="season-select" id="seasonSelectGroup">
           <label for="seasonSelect">Temporada:</label>
           <select id="seasonSelect"></select>
         </div>
@@ -109,6 +121,14 @@
           <span class="time" id="timeLabel">0:00 / 0:00</span>
           <div class="ctrl-spacer"></div>
           <select class="ep-quick-select" id="epQuickSelect" title="Cambiar de capítulo"></select>
+          <div class="player-settings">
+            <button class="ctrl" id="btnSettings" aria-label="Opciones de reproducción" title="Opciones">⚙</button>
+            <div class="settings-panel" id="settingsPanel" hidden>
+              <label><input type="checkbox" id="optAutoSkipIntro" /> Saltar intro automáticamente</label>
+              <label><input type="checkbox" id="optAutoSkipOutro" /> Saltar créditos automáticamente</label>
+              <label><input type="checkbox" id="optAutoNext" /> Pasar al siguiente capítulo solo</label>
+            </div>
+          </div>
           <div class="volume">
             <button class="ctrl" id="btnMute" aria-label="Silenciar">🔊</button>
             <input type="range" id="volume" min="0" max="1" step="0.05" value="1" />

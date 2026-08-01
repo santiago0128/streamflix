@@ -31,10 +31,12 @@ const API = (() => {
   return {
     getToken, getUser, setSession, clearSession,
     genres: () => req('/genres'),
-    series: (search, genre) => {
+    contentTypes: () => req('/content-types'),
+    series: (search, genre, type) => {
       const qs = new URLSearchParams();
       if (search) qs.set('search', search);
       if (genre) qs.set('genre', genre);
+      if (type) qs.set('type', type);
       return req('/series' + (qs.toString() ? '?' + qs : ''));
     },
     seriesDetail: (id) => req('/series/' + id),

@@ -1,0 +1,49 @@
+name: Desplegar en el servidor
+
+on:
+  push:
+    branches: [main]
+    # Cambios que no llegan al servidor no justifican un despliegue.
+    paths-ignore:
+      - '**.md'
+      - 'deploy/**'
+  workflow_dispatch:
+
+# Dos push seguidos no deben desplegar a la vez sobre el mismo servidor.
+concurrency:
+  group: despliegue-servidor
+  cancel-in-progress: false
+
+jobs:
+  desplegar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar acceso SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Clave del servidor fijada: evita aceptar a ciegas a quien conteste.
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: Enviar el código al servidor
+        # Es Actions quien empuja el código, no el servidor quien lo baja: así
+        # el repositorio puede ser privado sin dar credenciales de GitHub al
+        # servidor. --delete deja el destino idéntico al repositorio, y lo
+        # excluido (.env con los secretos) queda intacto.
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/id_deploy -o BatchMode=yes" \
+            --exclude '.git' \
+            --exclude '.env' \
+            --exclude 'node_modules' \
+            --exclude 'media' \
+            ./ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/streamflix/streamflix/
+
+      - name: Reconstruir y comprobar
+        run: |
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "/opt/streamflix/deploy.sh streamflix"

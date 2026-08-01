@@ -1,0 +1,8 @@
+# node_modules local son 96 MB y además traen binarios compilados para macOS:
+# la imagen instala los suyos con npm ci.
+node_modules
+.git
+.env
+media
+*.log
+.DS_Store

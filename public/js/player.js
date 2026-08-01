@@ -24,14 +24,51 @@ const Player = (() => {
   const volume = document.getElementById('volume');
   const epQuickSelect = document.getElementById('epQuickSelect');
   const playerClose = document.getElementById('playerClose');
+  const btnSettings = document.getElementById('btnSettings');
+  const settingsPanel = document.getElementById('settingsPanel');
+  const optAutoSkipIntro = document.getElementById('optAutoSkipIntro');
+  const optAutoSkipOutro = document.getElementById('optAutoSkipOutro');
+  const optAutoNext = document.getElementById('optAutoNext');
 
   let playlist = [];   // episodios de la temporada
   let index = 0;       // episodio actual
   let seriesTitle = '';
   let hideTimer = null;
   let hls = null;      // instancia de hls.js cuando el episodio es HLS
+  let autoSkippedIntro = false;  // para no volver a saltar si el usuario retrocede
+  let advancing = false;         // evita encadenar dos cambios de episodio
+
+  // Preferencias de reproducción, recordadas entre sesiones.
+  const SETTINGS_KEY = 'streamflix_player_settings';
+  const settings = Object.assign(
+    { autoSkipIntro: false, autoSkipOutro: false, autoNext: true },
+    (() => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch { return {}; } })()
+  );
+  const saveSettings = () => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+
+  // Cuando no hay marca de créditos (series y películas no traen), se considera
+  // outro el último tramo del episodio, que es cuando tiene sentido ofrecer el
+  // siguiente capítulo.
+  const OUTRO_FALLBACK_SEC = 40;
 
   const providerOf = (ep) => String(ep && ep.Provider || 'file').toLowerCase();
+  const hasNext = () => index < playlist.length - 1;
+
+  function durationOf(ep) {
+    return isFinite(video.duration) && video.duration > 0 ? video.duration : ep.DurationSec || 0;
+  }
+
+  function introWindow(ep) {
+    if (ep.IntroStartSec == null || ep.IntroEndSec == null) return null;
+    if (ep.IntroEndSec <= ep.IntroStartSec) return null;
+    return { start: ep.IntroStartSec, end: ep.IntroEndSec };
+  }
+
+  function outroStart(ep) {
+    if (ep.OutroStartSec != null) return ep.OutroStartSec;
+    const dur = durationOf(ep);
+    return dur > 120 ? dur - OUTRO_FALLBACK_SEC : null;
+  }
 
   const fmt = (s) => {
     if (!isFinite(s) || s < 0) s = 0;
@@ -85,16 +122,18 @@ const Player = (() => {
     }
   }
 
-  /** HLS: nativo en Safari, hls.js en el resto. */
-  function loadHls(url) {
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = url;
-      return;
-    }
+  /**
+   * HLS: hls.js primero, nativo sólo como respaldo.
+   * El orden importa: Chrome responde "maybe" a canPlayType('…mpegurl') pero no
+   * reproduce el playlist, así que preguntarle antes que a hls.js dejaba el
+   * video en negro. Nativo queda para donde no hay MSE, como Safari en iOS.
+   */
+  function loadHls(url, onReady) {
     if (window.Hls && window.Hls.isSupported()) {
       hls = new window.Hls({ enableWorker: true });
       hls.loadSource(url);
       hls.attachMedia(video);
+      hls.on(window.Hls.Events.MANIFEST_PARSED, () => { if (onReady) onReady(); });
       hls.on(window.Hls.Events.ERROR, (_evt, data) => {
         if (!data.fatal) return;
         // Los errores fatales de red/media son recuperables una vez.
@@ -102,6 +141,11 @@ const Player = (() => {
         else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
         else { hls.destroy(); hls = null; }
       });
+      return;
+    }
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url;
+      if (onReady) onReady();
       return;
     }
     console.error('Este navegador no soporta HLS y hls.js no está disponible.');
@@ -137,18 +181,44 @@ const Player = (() => {
     }
 
     setEmbedMode(false);
-    if (provider === 'hls') loadHls(ep.VideoUrl);
-    else video.src = ep.VideoUrl;
-    video.play().catch(() => {});
+    if (provider === 'hls') {
+      // Con HLS hay que esperar: loadSource/attachMedia son asíncronos y un
+      // play() inmediato se rechaza sin que se note, dejando el video parado
+      // hasta que el usuario lo arranca a mano.
+      loadHls(ep.VideoUrl, startPlayback);
+    } else {
+      video.src = ep.VideoUrl;
+      startPlayback();
+    }
     updateIntroMarker();
+  }
+
+  function startPlayback() {
+    video.play().catch((error) => {
+      // Si el navegador bloquea el autoplay con sonido, se reintenta en silencio
+      // antes de dejar el video parado.
+      if (error && error.name === 'NotAllowedError' && !video.muted) {
+        video.muted = true;
+        btnMute.textContent = '🔇';
+        video.play().catch(() => {});
+      }
+    });
   }
 
   function goTo(i) {
     if (i < 0 || i >= playlist.length) return;
     index = i;
+    autoSkippedIntro = false;
     load();
   }
-  const next = () => goTo(index + 1);
+  // El auto-avance puede dispararse desde 'timeupdate' y desde 'ended' casi a la
+  // vez; el cerrojo evita saltarse un episodio por partida doble.
+  function next() {
+    if (advancing || !hasNext()) return;
+    advancing = true;
+    goTo(index + 1);
+    setTimeout(() => { advancing = false; }, 1000);
+  }
   const prev = () => goTo(index - 1);
 
   function updateIntroMarker() {
@@ -174,15 +244,26 @@ const Player = (() => {
     timeLabel.textContent = `${fmt(t)} / ${fmt(dur)}`;
 
     // Botón "Saltar intro" dentro de la ventana de la intro
-    const inIntro = ep.IntroEndSec != null && ep.IntroStartSec != null &&
-                    ep.IntroEndSec > ep.IntroStartSec &&
-                    t >= (ep.IntroStartSec || 0) && t < ep.IntroEndSec;
+    const intro = introWindow(ep);
+    const inIntro = Boolean(intro) && t >= intro.start && t < intro.end;
+
+    if (inIntro && settings.autoSkipIntro && !autoSkippedIntro) {
+      autoSkippedIntro = true;
+      skipIntroBtn.hidden = true;
+      video.currentTime = intro.end;
+      return;
+    }
+
     skipIntroBtn.hidden = !inIntro;
 
     // Botón "Siguiente episodio" al llegar a los créditos
-    const hasNext = index < playlist.length - 1;
-    const inOutro = ep.OutroStartSec != null && t >= ep.OutroStartSec;
-    nextEpBtn.hidden = !(hasNext && inOutro);
+    const outro = outroStart(ep);
+    const inOutro = outro != null && t >= outro;
+    nextEpBtn.hidden = !(hasNext() && inOutro);
+
+    if (inOutro && settings.autoSkipOutro && hasNext()) {
+      next();
+    }
   });
 
   video.addEventListener('progress', () => {
@@ -192,7 +273,7 @@ const Player = (() => {
     }
   });
 
-  video.addEventListener('ended', () => { if (index < playlist.length - 1) next(); });
+  video.addEventListener('ended', () => { if (settings.autoNext) next(); });
   video.addEventListener('play', () => { btnPlay.textContent = '❚❚'; });
   video.addEventListener('pause', () => { btnPlay.textContent = '▶'; });
 
@@ -233,6 +314,34 @@ const Player = (() => {
   });
 
   playerClose.addEventListener('click', close);
+
+  // ---- Opciones de reproducción ----
+  function syncSettingsUI() {
+    optAutoSkipIntro.checked = settings.autoSkipIntro;
+    optAutoSkipOutro.checked = settings.autoSkipOutro;
+    optAutoNext.checked = settings.autoNext;
+  }
+
+  const bindSetting = (input, key) =>
+    input.addEventListener('change', () => {
+      settings[key] = input.checked;
+      saveSettings();
+    });
+
+  bindSetting(optAutoSkipIntro, 'autoSkipIntro');
+  bindSetting(optAutoSkipOutro, 'autoSkipOutro');
+  bindSetting(optAutoNext, 'autoNext');
+  syncSettingsUI();
+
+  btnSettings.addEventListener('click', (e) => {
+    e.stopPropagation();
+    settingsPanel.hidden = !settingsPanel.hidden;
+  });
+  document.addEventListener('click', (e) => {
+    if (!settingsPanel.hidden && !settingsPanel.contains(e.target) && e.target !== btnSettings) {
+      settingsPanel.hidden = true;
+    }
+  });
 
   // ---- Auto-ocultar UI ----
   function showUI() {

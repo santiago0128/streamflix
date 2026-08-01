@@ -1,0 +1,52 @@
+# Despliegue en servidor: base de datos + aplicación.
+# Las contraseñas y secretos salen del archivo .env que vive junto a este
+# fichero y que NO se versiona. Ver .env.example.
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: streamflix-sql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${DB_PASSWORD:?falta DB_PASSWORD en .env}"
+      MSSQL_PID: "Developer"
+      # Sin tope, SQL Server se queda con toda la RAM que encuentre y el resto
+      # del servidor acaba en el OOM killer. Este limite es el del motor.
+      MSSQL_MEMORY_LIMIT_MB: "${DB_MEMORY_LIMIT_MB:-1536}"
+    # Y este es el techo duro del contenedor, contando el proceso entero.
+    mem_limit: "${DB_MEM_LIMIT:-2g}"
+    volumes:
+      - streamflix-data:/var/opt/mssql
+    # Sin "ports": la base solo se alcanza desde la red interna de Docker.
+    # Exponer 1433 a internet es la forma más rápida de que te la revienten.
+    expose:
+      - "1433"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  app:
+    build: .
+    container_name: streamflix-app
+    environment:
+      DB_SERVER: sqlserver
+      DB_PORT: "1433"
+      DB_USER: sa
+      DB_PASSWORD: "${DB_PASSWORD:?falta DB_PASSWORD en .env}"
+      DB_NAME: "${DB_NAME:-StreamFlix}"
+      JWT_SECRET: "${JWT_SECRET:?falta JWT_SECRET en .env}"
+      PORT: "3000"
+    # Solo escucha en localhost del host: el acceso público entra por el
+    # proxy inverso (nginx/Caddy), que es quien pone HTTPS.
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  streamflix-data:

@@ -126,6 +126,22 @@ streamflix/
 (con `VideoUrl` + marcas `IntroStartSec`/`IntroEndSec`/`OutroStartSec`),
 `Watchlist` (Mi Lista) y `WatchProgress` (seguir viendo).
 
+## Proxy de reproducción
+Todo lo que no sea `Provider = 'embed'` se reproduce a través de
+`GET /api/episodes/:id/stream` en vez de apuntar al origen. Es lo que permite usar
+el reproductor propio con contenido importado: los CDN de origen no mandan
+`Access-Control-Allow-Origin`, así que el navegador no puede leerlos directamente.
+
+El proxy hace tres cosas además de reenviar el stream:
+
+- Reescribe los playlist `m3u8` para que las variantes y los segmentos también
+  pasen por aquí. Cada sub-recurso va firmado (`?u=...&sig=...`) para que el
+  endpoint no quede como proxy abierto a cualquier URL de internet.
+- Manda el `Referer` con el que se verificó el video, que algunos CDN exigen. Sale
+  de las tablas de snapshots que escribe el importador.
+- Destapa los segmentos que algunos CDN disfrazan de imagen (cabecera PNG con el
+  MPEG-TS detrás).
+
 ## Reproductor — atajos de teclado
 | Tecla | Acción |
 |-------|--------|

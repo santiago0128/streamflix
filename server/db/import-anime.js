@@ -326,10 +326,11 @@ async function importAnime(arg, opts) {
     .input('backdrop', sql.NVarChar(500), backdrop)
     .input('year', sql.Int, year)
     .input('rating', sql.Decimal(3, 1), rating)
+    .input('contentType', sql.NVarChar(20), 'anime')
     .input('sourceRef', sql.NVarChar(100), `kitsu:${anime.id}`)
-    .query(`INSERT INTO dbo.Series (Title, Description, PosterUrl, BackdropUrl, ReleaseYear, Rating, SourceRef)
+    .query(`INSERT INTO dbo.Series (Title, Description, PosterUrl, BackdropUrl, ReleaseYear, Rating, ContentType, SourceRef)
             OUTPUT INSERTED.Id
-            VALUES (@title, @description, @poster, @backdrop, @year, @rating, @sourceRef)`);
+            VALUES (@title, @description, @poster, @backdrop, @year, @rating, @contentType, @sourceRef)`);
   const seriesId = seriesIns.recordset[0].Id;
   console.log(`→ Serie insertada (Id ${seriesId})`);
 

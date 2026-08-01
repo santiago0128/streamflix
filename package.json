@@ -1,6 +1,6 @@
 {
   "name": "streamflix",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "description": "Plataforma de streaming — maqueta (SQL Server + Express + SPA)",
   "main": "server/index.js",
   "scripts": {

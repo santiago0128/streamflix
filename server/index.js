@@ -13,14 +13,20 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api', require('./routes/series'));
 app.use('/api/watchlist', require('./routes/watchlist'));
 
+// Marca de qué versión está corriendo. Permite confirmar desde fuera que un
+// despliegue llegó de verdad, sin tener que entrar al servidor.
+const VERSION_DESPLEGADA = require('../package.json').version;
+const ARRANCADO_EN = new Date().toISOString();
+
 // Health-check (verifica también la conexión a la base)
 app.get('/api/health', async (req, res) => {
+  const version = { version: VERSION_DESPLEGADA, startedAt: ARRANCADO_EN };
   try {
     const pool = await getPool();
     await pool.request().query('SELECT 1 AS ok');
-    res.json({ status: 'ok', db: 'connected' });
+    res.json({ status: 'ok', db: 'connected', ...version });
   } catch (err) {
-    res.status(503).json({ status: 'degraded', db: 'disconnected', error: err.message });
+    res.status(503).json({ status: 'degraded', db: 'disconnected', error: err.message, ...version });
   }
 });
 

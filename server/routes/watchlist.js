@@ -11,6 +11,7 @@ router.get('/', async (req, res) => {
     const pool = await getPool();
     const result = await pool.request().input('userId', sql.Int, req.user.id)
       .query(`SELECT s.Id, s.Title, s.PosterUrl, s.BackdropUrl, s.ReleaseYear, s.Rating,
+                     s.ContentType,
                      (SELECT STRING_AGG(g.Name, ', ')
                         FROM dbo.SeriesGenres sg JOIN dbo.Genres g ON g.Id = sg.GenreId
                        WHERE sg.SeriesId = s.Id) AS Genres,

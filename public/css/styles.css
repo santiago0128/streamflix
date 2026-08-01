@@ -94,6 +94,11 @@ button { font-family: inherit; cursor: pointer; }
 .card-genres { font-size: 12px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-rating { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,.75);
   color: #ffd34e; font-size: 12px; font-weight: 700; padding: 3px 7px; border-radius: 6px; }
+.card-type {
+  position: absolute; top: 8px; left: 8px; background: rgba(11,11,15,.82);
+  color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .02em;
+  padding: 4px 7px; border-radius: 6px; text-transform: uppercase;
+}
 .empty { text-align: center; color: var(--muted); padding: 60px 0; font-size: 16px; }
 
 /* ===================== MODALES ===================== */
@@ -220,3 +225,30 @@ button { font-family: inherit; cursor: pointer; }
   .ep-quick-select { max-width: 130px; }
   .skip-btn { right: 16px; bottom: 100px; }
 }
+
+/* Panel de opciones del reproductor (saltos automáticos y auto-avance) */
+.player-settings { position: relative; }
+.settings-panel {
+  position: absolute; bottom: 34px; right: 0; z-index: 5;
+  background: rgba(20, 20, 26, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+  white-space: nowrap; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.settings-panel[hidden] { display: none; }
+.settings-panel label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: #e6e6ea; cursor: pointer;
+}
+.settings-panel input { accent-color: #e50914; cursor: pointer; }
+
+/* Secciones por tipo en el inicio (anime / series / películas separados) */
+.type-section { margin-bottom: 36px; }
+.type-section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; }
+.type-section-head h3 { font-size: 21px; margin: 0; color: #f2f2f5; }
+.type-count {
+  font-size: 12px; color: #b6b6c0; background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px; padding: 2px 9px;
+}
+.type-section-all { margin-left: auto; font-size: 13px; padding: 5px 12px; }

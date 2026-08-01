@@ -38,6 +38,15 @@ CREATE TABLE dbo.Series (
 IF COL_LENGTH('dbo.Series', 'SourceRef') IS NULL
     ALTER TABLE dbo.Series ADD SourceRef NVARCHAR(100) NULL;
 
+-- Tipo de contenido principal:
+--   'anime'  = anime / animación japonesa importada
+--   'series' = serie convencional
+--   'movie'  = película (se modela con una temporada/episodio técnico para
+--              reutilizar el reproductor actual sin duplicar lógica)
+IF COL_LENGTH('dbo.Series', 'ContentType') IS NULL
+    ALTER TABLE dbo.Series ADD ContentType NVARCHAR(20) NOT NULL
+        CONSTRAINT DF_Series_ContentType DEFAULT 'series' WITH VALUES;
+
 -- Relación N:N Series <-> Géneros
 IF OBJECT_ID('dbo.SeriesGenres', 'U') IS NULL
 CREATE TABLE dbo.SeriesGenres (
@@ -47,6 +56,37 @@ CREATE TABLE dbo.SeriesGenres (
     CONSTRAINT FK_SeriesGenres_Series FOREIGN KEY (SeriesId) REFERENCES dbo.Series(Id) ON DELETE CASCADE,
     CONSTRAINT FK_SeriesGenres_Genres FOREIGN KEY (GenreId)  REFERENCES dbo.Genres(Id) ON DELETE CASCADE
 );
+
+-- Relleno de ContentType para filas anteriores a que existiera la columna.
+-- Va después de crear SeriesGenres: el UPDATE la consulta, y en una base nueva
+-- todavía no existía, así que la instalación limpia fallaba aquí.
+EXEC(N'
+UPDATE s
+   SET ContentType = CASE
+       WHEN s.SourceRef LIKE ''jkanime:%'' THEN ''anime''
+       WHEN EXISTS (
+           SELECT 1
+             FROM dbo.SeriesGenres sg
+             JOIN dbo.Genres g ON g.Id = sg.GenreId
+            WHERE sg.SeriesId = s.Id
+              AND g.Name IN (N''Anime'', N''Animación'')
+       ) THEN ''anime''
+       WHEN s.ContentType IS NULL OR s.ContentType = '''' THEN ''series''
+       ELSE s.ContentType
+   END
+  FROM dbo.Series s
+ WHERE s.SourceRef LIKE ''jkanime:%''
+    OR EXISTS (
+           SELECT 1
+             FROM dbo.SeriesGenres sg
+             JOIN dbo.Genres g ON g.Id = sg.GenreId
+            WHERE sg.SeriesId = s.Id
+              AND g.Name IN (N''Anime'', N''Animación'')
+       )
+    OR s.ContentType IS NULL
+    OR s.ContentType = ''''
+    OR s.ContentType NOT IN (''anime'', ''series'', ''movie'');
+');
 
 -- Temporadas
 IF OBJECT_ID('dbo.Seasons', 'U') IS NULL
