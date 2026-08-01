@@ -65,6 +65,10 @@ services:
     volumes:
       - ./.env:/streamflix/.env:ro
       - /opt/streamflix/estado:/estado
+    # Ollama corre en el host, fuera de Docker. Sin esta ruta el contenedor no
+    # lo alcanza y /pide se queda sin motor cuando no hay clave de Anthropic.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       sqlserver:
         condition: service_healthy
