@@ -354,10 +354,18 @@ const Player = (() => {
   // ---- Ciclo de reproducción ----
   video.addEventListener('loadedmetadata', updateIntroMarker);
 
+  let ultimoTiempoVisto = -1;
   video.addEventListener('timeupdate', () => {
     const ep = current();
     const dur = video.duration || ep.DurationSec || 0;
     const t = video.currentTime;
+
+    // Si el tiempo avanza es que hay imagen, se dijera lo que se dijera antes.
+    // Es la comprobación que cierra el caso de la rueda encendida de más.
+    if (t !== ultimoTiempoVisto) {
+      ultimoTiempoVisto = t;
+      if (!playerSpinner.hidden) playerSpinner.hidden = true;
+    }
     progressPlayed.style.width = dur ? (t / dur * 100) + '%' : '0%';
     timeLabel.textContent = `${fmt(t)} / ${fmt(dur)}`;
 
@@ -400,9 +408,16 @@ const Player = (() => {
   // móvil parece que el reproductor se colgó.
   const mostrarCarga = (on) => { playerSpinner.hidden = !on; };
   video.addEventListener('waiting', () => mostrarCarga(true));
-  video.addEventListener('stalled', () => mostrarCarga(true));
   video.addEventListener('seeking', () => mostrarCarga(true));
-  ['playing', 'canplay', 'seeked', 'error'].forEach((ev) =>
+
+  // Aquí estaba 'stalled', y era justo lo que dejaba la rueda encendida para
+  // siempre: con hls.js los datos llegan a ráfagas (un fragmento de 20 s y
+  // luego nada), así que el navegador lo dispara en plena reproducción normal.
+  // Y 'stalled' no tiene evento contrario, de modo que nada volvía a apagarla.
+
+  // Un vídeo en pausa no está cargando, y uno que avanza tampoco: eso último se
+  // comprueba en 'timeupdate', que es la única señal fiable de que hay imagen.
+  ['playing', 'canplay', 'seeked', 'error', 'pause'].forEach((ev) =>
     video.addEventListener(ev, () => mostrarCarga(false)));
 
   // Los episodios que no son HLS (Provider 'file') no pasan por hls.js, así que
