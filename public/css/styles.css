@@ -324,3 +324,48 @@ button { font-family: inherit; cursor: pointer; }
 
   .hero { height: 52dvh; }
 }
+
+/* --- Menú de móvil ----------------------------------------------------- */
+/* En un teléfono la barra amontonaba buscador, dos filtros y el botón de
+   sesión en el mismo renglón. Ahora arriba solo quedan dos iconos y todo eso
+   se recoge en un panel que se desliza. */
+.nav-icons { display: none; gap: 4px; }
+.nav-icon {
+  width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; color: var(--text); cursor: pointer; border-radius: 8px;
+}
+.nav-icon:active { background: rgba(255,255,255,.12); }
+
+@media (max-width: 560px) {
+  .navbar { flex-wrap: nowrap; }
+  .nav-icons { display: flex; }
+  .nav-left { width: auto; flex: 1; min-width: 0; }
+  .nav-links { display: none; }
+
+  .nav-right {
+    position: fixed; top: 0; right: 0; bottom: 0;
+    width: 82%; max-width: 320px;
+    flex-direction: column; align-items: stretch; gap: 18px;
+    background: var(--bg-elev); border-left: 1px solid var(--border);
+    padding: calc(18px + env(safe-area-inset-top)) 18px calc(18px + env(safe-area-inset-bottom));
+    transform: translateX(100%); transition: transform .22s ease;
+    z-index: 70; overflow-y: auto;
+  }
+  body.menu-open .nav-right { transform: none; }
+
+  /* Fondo oscuro detrás del panel. */
+  body.menu-open::before {
+    content: ''; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 69;
+  }
+
+  /* Dentro del panel las secciones vuelven, en vertical y con sitio para el dedo. */
+  .nav-right .nav-links-mobile,
+  body.menu-open .nav-links {
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .nav-right .nav-links a { padding: 12px 6px; font-size: 16px; border-bottom: 1px solid var(--border); }
+
+  .search-box { flex-direction: column; gap: 10px; width: 100%; }
+  .search-box input, .search-box select { width: 100%; min-height: 44px; }
+  .auth-area, .auth-area .btn { width: 100%; }
+}
