@@ -252,3 +252,52 @@ button { font-family: inherit; cursor: pointer; }
   border-radius: 999px; padding: 2px 9px;
 }
 .type-section-all { margin-left: auto; font-size: 13px; padding: 5px 12px; }
+
+/* --- Teléfonos -------------------------------------------------------- */
+/* El corte de 820px cubre tablets. En un móvil de 360px la rejilla sigue
+   apretada, la portada se come media pantalla y la ficha se abre como un
+   modal centrado, que ahí desperdicia justo el espacio que no sobra. */
+@media (max-width: 560px) {
+  .navbar { padding: 10px 14px; }
+  .nav-left { width: 100%; justify-content: space-between; gap: 12px; }
+  /* Las secciones no caben en una línea: se deslizan en vez de romperse. */
+  .nav-links { gap: 14px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-right { width: 100%; }
+  .search-box { width: 100%; }
+  .search-box input { width: auto; flex: 1; }
+
+  .hero { height: 52vh; min-height: 300px; }
+  .hero-content { padding: 0 18px 28px; max-width: none; }
+  .hero-content h1 { font-size: 26px; }
+  .hero-desc { font-size: 14px; margin-bottom: 16px; }
+  .hero-actions { flex-wrap: wrap; }
+  .hero-actions .btn { flex: 1 1 auto; }
+
+  .content { padding: 18px 14px 64px; }
+  .section-title { font-size: 18px; margin-bottom: 12px; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+  .card-body { padding: 8px 8px 10px; }
+  .card-title { font-size: 13px; }
+  .card-genres { font-size: 11px; }
+
+  /* La ficha pasa a pantalla completa. */
+  .modal { padding: 0; }
+  .modal-card { max-width: none; max-height: 100vh; height: 100%; border-radius: 0; }
+  .detail-hero { height: 200px; }
+  .detail-hero-info { left: 16px; right: 16px; bottom: 16px; }
+  .detail-hero-info h2 { font-size: 22px; }
+  .detail-body { padding: 16px 16px 24px; }
+  .detail-actions { flex-wrap: wrap; }
+  .detail-actions .btn { flex: 1 1 140px; }
+
+  /* 44 px es el mínimo por debajo del cual un dedo empieza a fallar el toque. */
+  .btn { min-height: 44px; }
+  .modal-close { width: 44px; height: 44px; top: 10px; right: 10px; }
+}
+
+/* En pantalla táctil no hay puntero que "pase por encima": sin esto el efecto
+   de hover se queda pegado en la tarjeta después de tocarla. */
+@media (hover: none) {
+  .card:hover { transform: none; box-shadow: none; }
+}
