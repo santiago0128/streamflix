@@ -344,7 +344,7 @@ button { font-family: inherit; cursor: pointer; }
 
   .nav-right {
     position: fixed; top: 0; right: 0; bottom: 0;
-    width: 82%; max-width: 320px;
+    width: 60%; max-width: 300px; min-width: 230px;
     flex-direction: column; align-items: stretch; gap: 18px;
     background: var(--bg-elev); border-left: 1px solid var(--border);
     padding: calc(18px + env(safe-area-inset-top)) 18px calc(18px + env(safe-area-inset-bottom));
@@ -370,3 +370,8 @@ button { font-family: inherit; cursor: pointer; }
   .search-box input, .search-box select { width: 100%; min-height: 44px; }
   .auth-area, .auth-area .btn { width: 100%; }
 }
+
+/* El panel vive fuera de pantalla hasta que se abre, y eso ensancha el
+   documento: aparecia una barra de desplazamiento horizontal en toda la
+   pagina. Nada aqui debe desbordar a lo ancho. */
+html, body { max-width: 100%; overflow-x: hidden; }
