@@ -181,11 +181,12 @@ const Player = (() => {
     if (window.Hls && window.Hls.isSupported()) {
       hls = new window.Hls({
         enableWorker: true,
-        // Los episodios importados vienen troceados en fragmentos de 20 s (~2 MB).
-        // Por defecto hls.js espera a tener el fragmento entero antes de pintar
-        // nada, y eso es justo la espera que se nota al darle a reproducir.
-        // En modo progresivo va entregando lo que va llegando y arranca antes.
-        progressive: true,
+        // OJO: aquí estuvo `progressive: true`. Sobre el papel encaja (los
+        // fragmentos duran 20 s y así se empieza con lo que va llegando), pero
+        // en la práctica dejaba el vídeo cargando indefinidamente. Está marcada
+        // como experimental en hls.js y no compensa: no volver a activarla sin
+        // probar la reproducción de verdad en un navegador.
+        //
         // Pide el primer fragmento mientras todavía se está leyendo el manifiesto
         // en vez de esperar a terminarlo.
         startFragPrefetch: true,
