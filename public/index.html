@@ -197,6 +197,22 @@
       var lupa = document.getElementById('btnSearchToggle');
       var panel = document.querySelector('.nav-right');
       var buscador = document.getElementById('searchInput');
+      var secciones = document.querySelector('.nav-links');
+
+      // Las secciones viven junto al logo, no en el panel, y con CSS no se
+      // pueden recolocar. En movil se mudan dentro; al volver a pantalla
+      // grande regresan a su sitio para no descolocar el escritorio.
+      var sitioOriginal = secciones ? secciones.parentNode : null;
+      var estrecho = window.matchMedia('(max-width: 560px)');
+
+      function colocarSecciones() {
+        if (!secciones || !panel) return;
+        if (estrecho.matches) {
+          if (secciones.parentNode !== panel) panel.insertBefore(secciones, panel.firstChild);
+        } else if (sitioOriginal && secciones.parentNode !== sitioOriginal) {
+          sitioOriginal.appendChild(secciones);
+        }
+      }
 
       function abrir(estado, enfocarBusqueda) {
         cuerpo.classList.toggle('menu-open', estado);
@@ -204,6 +220,9 @@
         if (lupa) lupa.setAttribute('aria-expanded', String(estado));
         if (estado && enfocarBusqueda && buscador) setTimeout(function () { buscador.focus(); }, 220);
       }
+
+      colocarSecciones();
+      if (estrecho.addEventListener) estrecho.addEventListener('change', colocarSecciones);
 
       if (menu) menu.addEventListener('click', function () { abrir(!cuerpo.classList.contains('menu-open'), false); });
       if (lupa) lupa.addEventListener('click', function () { abrir(true, true); });

@@ -348,6 +348,7 @@ button { font-family: inherit; cursor: pointer; }
     flex-direction: column; align-items: stretch; gap: 18px;
     background: var(--bg-elev); border-left: 1px solid var(--border);
     padding: calc(18px + env(safe-area-inset-top)) 18px calc(18px + env(safe-area-inset-bottom));
+    height: 100dvh;
     transform: translateX(100%); transition: transform .22s ease;
     z-index: 70; overflow-y: auto;
   }
@@ -359,9 +360,9 @@ button { font-family: inherit; cursor: pointer; }
   }
 
   /* Dentro del panel las secciones vuelven, en vertical y con sitio para el dedo. */
-  .nav-right .nav-links-mobile,
-  body.menu-open .nav-links {
-    display: flex; flex-direction: column; gap: 2px;
+  /* Ya dentro del panel: en vertical y con sitio para el dedo. */
+  .nav-right .nav-links {
+    display: flex; flex-direction: column; gap: 2px; width: 100%;
   }
   .nav-right .nav-links a { padding: 12px 6px; font-size: 16px; border-bottom: 1px solid var(--border); }
 
