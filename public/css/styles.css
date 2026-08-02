@@ -301,3 +301,26 @@ button { font-family: inherit; cursor: pointer; }
 @media (hover: none) {
   .card:hover { transform: none; box-shadow: none; }
 }
+
+/* --- iPhone con isla / notch ------------------------------------------ */
+/* Dos cosas rompen aquí y no son cosméticas:
+   1. En Safari de iOS, 100vh NO es la pantalla visible: incluye la barra del
+      navegador, así que un elemento a 100vh se sale por abajo. dvh sí mide lo
+      visible de verdad; el vh queda antes como respaldo para navegadores viejos.
+   2. La isla dinámica y la barra inferior se comen contenido si no se respeta
+      el área segura. */
+@media (max-width: 560px) {
+  .navbar { padding-top: max(10px, env(safe-area-inset-top)); }
+  .content { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+
+  .modal-card {
+    max-height: 100vh;
+    max-height: 100dvh;
+    height: 100vh;
+    height: 100dvh;
+  }
+  .detail-body { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+  .modal-close { top: max(10px, env(safe-area-inset-top)); }
+
+  .hero { height: 52dvh; }
+}
