@@ -72,6 +72,36 @@ function unwrapSegment(buffer) {
   return buffer;
 }
 
+// Caché de playlists ya reescritos. Son pequeños (unas decenas de KB) y no
+// cambian mientras el token de la URL siga vivo, así que el TTL corto solo está
+// para que la memoria no crezca sin fin, no por miedo a servir algo caducado:
+// cuando el token cambia, la URL de origen cambia y con ella la clave.
+const PLAYLIST_TTL_MS = 5 * 60 * 1000;
+const PLAYLIST_CACHE_MAX = 200;
+const playlistCache = new Map();
+
+function leerPlaylist(sourceUrl) {
+  const hit = playlistCache.get(sourceUrl);
+  if (!hit) return null;
+  if (Date.now() > hit.expiraEn) {
+    playlistCache.delete(sourceUrl);
+    return null;
+  }
+  return hit;
+}
+
+function guardarPlaylist(sourceUrl, body, contentType) {
+  // Map conserva el orden de inserción, así que el primero es el más viejo.
+  if (playlistCache.size >= PLAYLIST_CACHE_MAX) {
+    playlistCache.delete(playlistCache.keys().next().value);
+  }
+  playlistCache.set(sourceUrl, {
+    body,
+    contentType: contentType || 'application/vnd.apple.mpegurl',
+    expiraEn: Date.now() + PLAYLIST_TTL_MS
+  });
+}
+
 // Reescribe el playlist para que todo lo que cuelga de él vuelva por el proxy.
 function rewritePlaylist(body, baseUrl, episodeId) {
   const toProxy = (rawUrl) => {
@@ -407,6 +437,19 @@ router.get('/episodes/:id/stream', async (req, res) => {
       return res.redirect(target);
     }
 
+    // Los playlists ya reescritos se reutilizan un rato: son idénticos para todo
+    // el que pida el mismo episodio y traerlos del origen cuesta cerca de un
+    // segundo, que es tiempo de espera antes del primer fotograma. Se guardan
+    // por URL de origen, así que el token que llevan dentro sigue mandando: en
+    // cuanto cambia, la clave es otra.
+    const cacheado = leerPlaylist(target);
+    if (cacheado) {
+      res.status(200);
+      res.setHeader('content-type', cacheado.contentType);
+      res.setHeader('cache-control', 'no-store');
+      return res.send(cacheado.body);
+    }
+
     const forwardedHeaders = {
       'User-Agent': req.get('user-agent') || 'StreamFlix/1.0',
       Accept: req.get('accept') || '*/*'
@@ -453,6 +496,7 @@ router.get('/episodes/:id/stream', async (req, res) => {
         }
 
         const rewritten = rewritePlaylist(body.toString('utf8'), finalUrl, id);
+        guardarPlaylist(target, rewritten, upstream.headers['content-type']);
         // Siempre 200: lo que se manda es el playlist reescrito completo, no el
         // cuerpo original, así que un 206 de arriba dejaría de tener sentido.
         res.status(200);

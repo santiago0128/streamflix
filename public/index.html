@@ -138,6 +138,27 @@
               allow="autoplay; fullscreen; encrypted-media"
               allowfullscreen referrerpolicy="no-referrer"></iframe>
 
+      <!-- Mando central: en el móvil los controles de abajo quedan pequeños para
+           el dedo, así que lo esencial (retroceder, reproducir, avanzar) vive
+           aquí, grande y en el centro. -->
+      <div class="player-center" id="playerCenter">
+        <button class="round-btn" id="btnBack10" aria-label="Retroceder 10 segundos">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 4 12l7 7"/><path d="M4 12h9a7 7 0 1 1 0 14h-2"/></svg>
+          <span class="round-btn-label">10</span>
+        </button>
+        <button class="round-btn big" id="btnPlayBig" aria-label="Reproducir o pausar">
+          <svg class="icon-play" viewBox="0 0 24 24" width="34" height="34" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="icon-pause" viewBox="0 0 24 24" width="34" height="34" fill="currentColor" hidden><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+        </button>
+        <button class="round-btn" id="btnFwd10" aria-label="Avanzar 10 segundos">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 5 7 7-7 7"/><path d="M20 12h-9a7 7 0 1 0 0 14h2"/></svg>
+          <span class="round-btn-label">10</span>
+        </button>
+      </div>
+
+      <!-- Indicador de carga: sin esto, en móvil parece que no pasa nada -->
+      <div class="player-spinner" id="playerSpinner" hidden><div class="spinner-ring"></div></div>
+
       <!-- Botones contextuales -->
       <button class="skip-btn" id="skipIntroBtn" hidden>Saltar intro ⏭</button>
       <button class="skip-btn next-ep" id="nextEpBtn" hidden>Siguiente episodio ▶</button>

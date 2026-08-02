@@ -24,6 +24,13 @@ const Player = (() => {
   const volume = document.getElementById('volume');
   const epQuickSelect = document.getElementById('epQuickSelect');
   const playerClose = document.getElementById('playerClose');
+  const playerCenter = document.getElementById('playerCenter');
+  const playerSpinner = document.getElementById('playerSpinner');
+  const btnPlayBig = document.getElementById('btnPlayBig');
+  const btnBack10 = document.getElementById('btnBack10');
+  const btnFwd10 = document.getElementById('btnFwd10');
+  const iconPlay = btnPlayBig.querySelector('.icon-play');
+  const iconPause = btnPlayBig.querySelector('.icon-pause');
   const btnSettings = document.getElementById('btnSettings');
   const settingsPanel = document.getElementById('settingsPanel');
   const optAutoSkipIntro = document.getElementById('optAutoSkipIntro');
@@ -81,18 +88,56 @@ const Player = (() => {
 
   const current = () => playlist[index];
 
+  // Un teléfono se reconoce por el puntero, no por el ancho: un portátil táctil
+  // estrecho no debe acabar con la pantalla bloqueada en horizontal.
+  const esMovil = () =>
+    window.matchMedia('(pointer: coarse)').matches && window.matchMedia('(max-width: 900px)').matches;
+
+  /**
+   * En el móvil, ver una serie en vertical es desperdiciar la pantalla. Al abrir
+   * se pide pantalla completa y se gira a horizontal.
+   * Bloquear la orientación exige estar en pantalla completa, así que van juntas
+   * y en ese orden. iOS no implementa ninguna de las dos sobre un div, de modo
+   * que allí esto no hace nada y el reproductor se queda como esté: por eso todo
+   * va en try/catch y ningún fallo corta la reproducción.
+   */
+  async function girarPantalla() {
+    if (!esMovil()) return;
+    try {
+      if (!document.fullscreenElement && overlay.requestFullscreen) {
+        await overlay.requestFullscreen({ navigationUI: 'hide' });
+      }
+    } catch { /* el navegador la negó; seguimos igual */ }
+    try {
+      if (screen.orientation && screen.orientation.lock) {
+        await screen.orientation.lock('landscape');
+      }
+    } catch { /* iOS y escritorio no lo permiten */ }
+  }
+
+  function soltarPantalla() {
+    try {
+      if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock();
+    } catch { /* daba igual */ }
+  }
+
   function open(list, startIndex, sTitle) {
     playlist = list || [];
     index = startIndex || 0;
     seriesTitle = sTitle || '';
     buildEpSelect();
     overlay.hidden = false;
+    // Antes de cargar: se llama desde el gesto del usuario, y tanto la pantalla
+    // completa como el giro exigen precisamente eso para que el navegador los
+    // conceda. Esperar a que el vídeo esté listo llegaría tarde.
+    girarPantalla();
     load();
   }
 
   function close() {
     teardownSource();
     overlay.hidden = true;
+    soltarPantalla();
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   }
 
@@ -114,9 +159,13 @@ const Player = (() => {
     video.hidden = on;
     videoEmbed.hidden = !on;
     playerControls.hidden = on;
+    // El mando central y la señal de carga son nuestros: con un reproductor
+    // ajeno no controlamos nada, así que estorban.
+    playerCenter.hidden = on;
     if (on) {
       skipIntroBtn.hidden = true;
       nextEpBtn.hidden = true;
+      playerSpinner.hidden = true;
       stage.classList.remove('hide-ui');
       clearTimeout(hideTimer);
     }
@@ -130,7 +179,24 @@ const Player = (() => {
    */
   function loadHls(url, onReady) {
     if (window.Hls && window.Hls.isSupported()) {
-      hls = new window.Hls({ enableWorker: true });
+      hls = new window.Hls({
+        enableWorker: true,
+        // Los episodios importados vienen troceados en fragmentos de 20 s (~2 MB).
+        // Por defecto hls.js espera a tener el fragmento entero antes de pintar
+        // nada, y eso es justo la espera que se nota al darle a reproducir.
+        // En modo progresivo va entregando lo que va llegando y arranca antes.
+        progressive: true,
+        // Pide el primer fragmento mientras todavía se está leyendo el manifiesto
+        // en vez de esperar a terminarlo.
+        startFragPrefetch: true,
+        // Con fragmentos tan largos, el buffer por defecto se traduce en pedir de
+        // más al arrancar; 30 s es un fragmento y medio, suficiente.
+        maxBufferLength: 30,
+        // Y no guardar lo ya visto, que en un móvil es memoria tirada.
+        backBufferLength: 30,
+        // Sin esto se puede elegir una calidad mayor que la propia pantalla.
+        capLevelToPlayerSize: true
+      });
       hls.loadSource(url);
       hls.attachMedia(video);
       hls.on(window.Hls.Events.MANIFEST_PARSED, () => { if (onReady) onReady(); });
@@ -181,6 +247,7 @@ const Player = (() => {
     }
 
     setEmbedMode(false);
+    playerSpinner.hidden = false;  // hasta que llegue el primer fotograma
     if (provider === 'hls') {
       // Con HLS hay que esperar: loadSource/attachMedia son asíncronos y un
       // play() inmediato se rechaza sin que se note, dejando el video parado
@@ -274,13 +341,41 @@ const Player = (() => {
   });
 
   video.addEventListener('ended', () => { if (settings.autoNext) next(); });
-  video.addEventListener('play', () => { btnPlay.textContent = '❚❚'; });
-  video.addEventListener('pause', () => { btnPlay.textContent = '▶'; });
+  video.addEventListener('play', () => { btnPlay.textContent = '❚❚'; syncPlayIcon(true); });
+  video.addEventListener('pause', () => { btnPlay.textContent = '▶'; syncPlayIcon(false); });
+
+  // ---- Señal de carga ----
+  // Mientras no haya imagen, algo tiene que moverse en pantalla; si no, en el
+  // móvil parece que el reproductor se colgó.
+  const mostrarCarga = (on) => { playerSpinner.hidden = !on; };
+  video.addEventListener('waiting', () => mostrarCarga(true));
+  video.addEventListener('stalled', () => mostrarCarga(true));
+  video.addEventListener('seeking', () => mostrarCarga(true));
+  ['playing', 'canplay', 'seeked', 'error'].forEach((ev) =>
+    video.addEventListener(ev, () => mostrarCarga(false)));
+
+  function syncPlayIcon(reproduciendo) {
+    iconPlay.hidden = reproduciendo;
+    iconPause.hidden = !reproduciendo;
+  }
+
+  // ---- Mando central (móvil) ----
+  const saltar = (segundos) => {
+    if (!isFinite(video.duration)) return;
+    video.currentTime = Math.min(Math.max(0, video.currentTime + segundos), video.duration);
+    showUI();
+  };
+  btnPlayBig.addEventListener('click', () => { togglePlay(); showUI(); });
+  btnBack10.addEventListener('click', () => saltar(-10));
+  btnFwd10.addEventListener('click', () => saltar(10));
 
   // ---- Controles ----
   const togglePlay = () => (video.paused ? video.play() : video.pause());
   btnPlay.addEventListener('click', togglePlay);
-  video.addEventListener('click', togglePlay);
+  // En el móvil el toque sobre el vídeo saca los controles; pausar es lo que
+  // hace el botón central. Si además alternara la reproducción, cada intento de
+  // ver los controles pararía la película.
+  video.addEventListener('click', () => { if (esMovil()) showUI(); else togglePlay(); });
   btnNext.addEventListener('click', next);
   btnPrev.addEventListener('click', prev);
   epQuickSelect.addEventListener('change', (e) => goTo(Number(e.target.value)));

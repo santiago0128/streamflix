@@ -205,6 +205,90 @@ button { font-family: inherit; cursor: pointer; }
 .volume { display: flex; align-items: center; gap: 8px; }
 .volume input[type=range] { width: 90px; accent-color: var(--accent); }
 
+/* ===================== REPRODUCTOR: MANDO CENTRAL ===================== */
+/* En escritorio manda la barra de abajo; esto es para el dedo, así que solo
+   aparece donde el puntero es grueso o la pantalla es pequeña. */
+.player-center {
+  position: absolute; inset: 0; z-index: 4; display: none;
+  align-items: center; justify-content: center; gap: 34px;
+  pointer-events: none;
+}
+.player-center .round-btn { pointer-events: auto; }
+.round-btn {
+  position: relative; width: 54px; height: 54px; border-radius: 50%;
+  border: none; background: rgba(0, 0, 0, .45); color: #fff;
+  display: grid; place-items: center;
+  transition: background .15s, transform .06s;
+}
+.round-btn:active { transform: scale(.92); background: rgba(0, 0, 0, .7); }
+.round-btn.big { width: 74px; height: 74px; background: rgba(0, 0, 0, .55); }
+/* El "10" va dentro de la flecha circular, como en cualquier reproductor. */
+.round-btn-label {
+  position: absolute; top: 52%; left: 50%; transform: translate(-50%, -50%);
+  font-size: 10px; font-weight: 700; letter-spacing: -.02em;
+}
+.player-stage.hide-ui .player-center { opacity: 0; pointer-events: none; }
+.player-center { transition: opacity .3s; }
+
+/* Indicador de carga: los segmentos duran 20 s, así que el primero tarda en
+   llegar y sin esto parece que el reproductor se colgó. */
+.player-spinner { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; pointer-events: none; }
+.spinner-ring {
+  width: 54px; height: 54px; border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, .25); border-top-color: var(--accent);
+  animation: girar .8s linear infinite;
+}
+@keyframes girar { to { transform: rotate(360deg); } }
+
+/* ===================== REPRODUCTOR EN MÓVIL ===================== */
+@media (max-width: 900px), (pointer: coarse) {
+  .player-center { display: flex; }
+
+  /* Lo que se movió al centro sobra abajo, y el volumen lo llevan las teclas
+     físicas del teléfono. */
+  .player-controls #btnPlay,
+  .player-controls #btnPrev,
+  .player-controls #btnNext,
+  .player-controls .volume input[type=range] { display: none; }
+
+  .player-controls { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .controls-row { gap: 10px; }
+  /* 44 px es el mínimo por debajo del cual el dedo empieza a fallar. */
+  .controls-row .ctrl { min-width: 44px; min-height: 44px; font-size: 22px; }
+  .time { font-size: 12px; }
+  .ep-quick-select { max-width: 108px; min-height: 40px; font-size: 12px; }
+
+  /* La barra de progreso es lo más difícil de acertar con el dedo: se engorda y
+     se le da un área de toque mayor que su altura visible. */
+  .progress { height: 5px; margin-bottom: 12px; }
+  .progress::before { content: ''; position: absolute; inset: -14px 0; }
+  .progress-played::after { width: 16px; height: 16px; right: -8px; }
+
+  .player-title {
+    top: max(14px, env(safe-area-inset-top)); left: 68px; right: 16px;
+    font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .player-close {
+    top: max(12px, env(safe-area-inset-top));
+    left: max(12px, env(safe-area-inset-left));
+  }
+  .skip-btn { bottom: 84px; right: max(14px, env(safe-area-inset-right)); padding: 11px 16px; font-size: 14px; }
+  .settings-panel { font-size: 14px; }
+  .settings-panel label { min-height: 34px; }
+}
+
+/* Móvil en horizontal: la pantalla es baja, así que todo se aprieta en vertical
+   para que el vídeo siga siendo lo que más ocupa. */
+@media (max-height: 480px) and (orientation: landscape) {
+  .player-center { gap: 42px; }
+  .round-btn { width: 46px; height: 46px; }
+  .round-btn.big { width: 62px; height: 62px; }
+  .player-controls { padding: 6px 14px calc(6px + env(safe-area-inset-bottom)); }
+  .progress { margin-bottom: 8px; }
+  .skip-btn { bottom: 62px; }
+  .player-title { font-size: 13px; }
+}
+
 /* ===================== TOAST ===================== */
 .toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 100;
   background: var(--card); border: 1px solid var(--border); color: var(--text);
