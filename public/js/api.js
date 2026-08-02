@@ -32,11 +32,14 @@ const API = (() => {
     getToken, getUser, setSession, clearSession,
     genres: () => req('/genres'),
     contentTypes: () => req('/content-types'),
-    series: (search, genre, type) => {
+    // Sin `page` responde un array con todo; con `page`, un objeto
+    // { items, total, page, pageSize, totalPages }.
+    series: ({ search, genre, type, page, pageSize } = {}) => {
       const qs = new URLSearchParams();
       if (search) qs.set('search', search);
       if (genre) qs.set('genre', genre);
       if (type) qs.set('type', type);
+      if (page) { qs.set('page', page); qs.set('pageSize', pageSize || 24); }
       return req('/series' + (qs.toString() ? '?' + qs : ''));
     },
     seriesDetail: (id) => req('/series/' + id),

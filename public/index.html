@@ -64,11 +64,38 @@
 
   <!-- ===================== CATÁLOGO ===================== -->
   <main class="content">
-    <h2 class="section-title" id="sectionTitle">Series</h2>
-    <!-- Una sola rejilla cuando hay filtro o búsqueda; en el inicio se usan las
-         secciones por tipo de abajo para no mezclar anime, series y películas. -->
-    <div class="grid" id="grid"></div>
+    <!-- Inicio: un carrusel por tipo, con lo último de cada uno. -->
     <div id="sections"></div>
+
+    <!-- Listado completo: el "Ver más" de cada carrusel, la búsqueda y Mi Lista
+         terminan aquí, con sus filtros y la paginación. -->
+    <section class="browse" id="browse" hidden>
+      <div class="browse-head">
+        <h2 class="section-title" id="sectionTitle">Series</h2>
+        <span class="browse-count" id="browseCount"></span>
+      </div>
+      <div class="filter-bar">
+        <label class="filter-field">
+          <span>Tipo</span>
+          <select id="browseType">
+            <option value="">Todo</option>
+            <option value="anime">Anime</option>
+            <option value="series">Series</option>
+            <option value="movie">Películas</option>
+          </select>
+        </label>
+        <label class="filter-field">
+          <span>Género</span>
+          <select id="browseGenre">
+            <option value="">Todos los géneros</option>
+          </select>
+        </label>
+        <button class="btn btn-ghost filter-clear" id="clearFilters" type="button" hidden>Limpiar filtros</button>
+      </div>
+      <div class="grid" id="grid"></div>
+      <nav class="pagination" id="pagination" aria-label="Paginación" hidden></nav>
+    </section>
+
     <p class="empty" id="emptyState" hidden>No se encontraron resultados.</p>
   </main>
 

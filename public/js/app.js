@@ -2,13 +2,18 @@
 (() => {
   // ---------- Estado ----------
   const state = {
-    view: 'home',        // 'home' | 'mylist'
+    view: 'home',        // 'home' | 'browse' | 'mylist'
     search: '',
     genre: '',
     contentType: '',
+    page: 1,             // sólo aplica al listado ('browse' y 'mylist')
     detail: null,        // serie abierta en el modal
     myListIds: new Set(),
   };
+
+  // Cuántas fichas trae cada carrusel del inicio y cada página del listado.
+  const CAROUSEL_SIZE = 10;
+  const PAGE_SIZE = 24;
 
   // ---------- Utilidades ----------
   const $ = (id) => document.getElementById(id);
@@ -25,13 +30,15 @@
     anime: { label: 'Anime', section: 'Animes' },
     series: { label: 'Serie', section: 'Series' },
     movie: { label: 'Película', section: 'Películas' },
-    default: { label: 'Contenido', section: 'Contenido' }
+    default: { label: 'Contenido', section: 'Todo el catálogo' }
   };
   function getContentTypeMeta(type) {
     return contentTypeMeta[type] || contentTypeMeta.default;
   }
   function getSectionTitle() {
-    return state.view === 'mylist' ? 'Mi Lista' : getContentTypeMeta(state.contentType).section;
+    if (state.view === 'mylist') return 'Mi Lista';
+    if (state.search) return `Resultados para "${state.search}"`;
+    return getContentTypeMeta(state.contentType).section;
   }
 
   // ---------- Auth UI ----------
@@ -70,36 +77,90 @@
   // ---------- Catálogo ----------
   const grid = $('grid');
   const emptyState = $('emptyState');
-
   const sectionsEl = $('sections');
+  const browseEl = $('browse');
+  const paginationEl = $('pagination');
+
   // Orden en el que se muestran las secciones del inicio.
   const SECTION_ORDER = ['anime', 'series', 'movie'];
 
-  async function loadCatalog() {
+  function loadCatalog() {
+    return state.view === 'home' ? loadHome() : loadListing();
+  }
+
+  // ---------- Inicio: un carrusel por tipo ----------
+  async function loadHome() {
+    sectionsEl.hidden = false;
+    browseEl.hidden = true;
+    paginationEl.hidden = true;
     try {
-      let list;
-      if (state.view === 'mylist') {
-        list = await API.watchlist();
-        state.myListIds = new Set(list.map((s) => s.Id));
-        // filtro/búsqueda en cliente sobre la lista propia
-        if (state.contentType) list = list.filter((s) => s.ContentType === state.contentType);
-        if (state.genre) list = list.filter((s) => (s.Genres || '').includes(state.genre));
-        if (state.search) list = list.filter((s) => s.Title.toLowerCase().includes(state.search.toLowerCase()));
-      } else {
-        list = await API.series(state.search, state.genre, state.contentType);
-      }
+      const respuestas = await Promise.all(SECTION_ORDER.map((type) =>
+        API.series({ type, page: 1, pageSize: CAROUSEL_SIZE })));
 
-      // Con un filtro puesto ya se está viendo un solo tipo, así que ahí una
-      // rejilla sola es más clara que repetir el encabezado de la sección.
-      const agrupar = state.view === 'home' && !state.contentType && !state.search;
-      if (agrupar) renderSections(list);
-      else renderCards(list);
+      const secciones = SECTION_ORDER
+        .map((type, i) => ({ type, items: respuestas[i].items, total: respuestas[i].total }))
+        .filter((s) => s.items.length);
 
-      renderHero(state.view === 'home' && !state.search && !state.genre ? list[0] : null);
+      renderSections(secciones);
+      emptyState.hidden = secciones.length > 0;
+      // El destacado sale del primer carrusel con contenido.
+      renderHero(secciones.length ? secciones[0].items[0] : null);
+    } catch (err) {
+      toast(err.message);
+      renderSections([]);
+      renderHero(null);
+    }
+  }
+
+  // ---------- Listado completo, paginado y con filtros ----------
+  async function loadListing() {
+    sectionsEl.hidden = true;
+    browseEl.hidden = false;
+    clearCarousels();
+    renderHero(null);
+    try {
+      const { items, total } = state.view === 'mylist' ? await fetchMyListPage() : await fetchSeriesPage();
+
+      // Al estrechar el resultado (otro filtro, otra búsqueda) la página actual
+      // puede quedar más allá del final: se vuelve a la última que sí existe.
+      const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+      if (state.page > totalPages) { state.page = totalPages; return loadListing(); }
+
+      renderCards(items);
+      renderPagination(total, totalPages);
+      renderBrowseHead(total);
     } catch (err) {
       toast(err.message);
       renderCards([]);
+      renderPagination(0, 1);
+      renderBrowseHead(0);
     }
+  }
+
+  async function fetchSeriesPage() {
+    const data = await API.series({
+      search: state.search, genre: state.genre, type: state.contentType,
+      page: state.page, pageSize: PAGE_SIZE,
+    });
+    return { items: data.items, total: data.total };
+  }
+
+  // Mi Lista es corta y ya viene entera en una llamada, así que el filtrado y el
+  // troceado se hacen aquí en vez de pedirle páginas al servidor.
+  async function fetchMyListPage() {
+    let list = await API.watchlist();
+    state.myListIds = new Set(list.map((s) => s.Id));
+    if (state.contentType) list = list.filter((s) => s.ContentType === state.contentType);
+    if (state.genre) list = list.filter((s) => (s.Genres || '').includes(state.genre));
+    if (state.search) list = list.filter((s) => s.Title.toLowerCase().includes(state.search.toLowerCase()));
+    const desde = (state.page - 1) * PAGE_SIZE;
+    return { items: list.slice(desde, desde + PAGE_SIZE), total: list.length };
+  }
+
+  function renderBrowseHead(total) {
+    $('sectionTitle').textContent = getSectionTitle();
+    $('browseCount').textContent = total === 1 ? '1 título' : `${total} títulos`;
+    $('clearFilters').hidden = !(state.search || state.genre || state.contentType);
   }
 
   function buildCard(s) {
@@ -119,61 +180,190 @@
   }
 
   function renderCards(list) {
-    sectionsEl.innerHTML = '';
-    sectionsEl.hidden = true;
-    grid.hidden = false;
     grid.innerHTML = '';
     emptyState.hidden = list.length > 0;
     list.forEach((s) => grid.appendChild(buildCard(s)));
   }
 
-  // Inicio: una sección por tipo, en vez de todo mezclado en la misma rejilla.
-  function renderSections(list) {
-    grid.innerHTML = '';
-    grid.hidden = true;
-    sectionsEl.hidden = false;
+  // ---------- Carruseles del inicio ----------
+  // Cada carrusel observa su propio ancho para saber si las flechas hacen falta;
+  // al re-dibujar el inicio hay que soltar los observadores anteriores.
+  let carouselObservers = [];
+  function clearCarousels() {
+    carouselObservers.forEach((o) => o.disconnect());
+    carouselObservers = [];
+  }
+
+  function buildCarousel(items) {
+    const carousel = document.createElement('div');
+    carousel.className = 'carousel';
+
+    const track = document.createElement('div');
+    track.className = 'carousel-track';
+    items.forEach((s) => track.appendChild(buildCard(s)));
+
+    const prev = buildCarouselArrow('prev', '‹', 'Anterior');
+    const next = buildCarouselArrow('next', '›', 'Siguiente');
+    carousel.append(prev, track, next);
+
+    // Las flechas se apagan en los extremos, y el carrusel entero las esconde
+    // cuando no hay nada que desplazar.
+    function sync() {
+      const max = track.scrollWidth - track.clientWidth;
+      carousel.classList.toggle('no-scroll', max <= 1);
+      prev.disabled = track.scrollLeft <= 1;
+      next.disabled = track.scrollLeft >= max - 1;
+    }
+    const salto = () => Math.max(track.clientWidth * 0.85, 160);
+    prev.addEventListener('click', () => track.scrollBy({ left: -salto(), behavior: 'smooth' }));
+    next.addEventListener('click', () => track.scrollBy({ left: salto(), behavior: 'smooth' }));
+    track.addEventListener('scroll', sync, { passive: true });
+
+    // El ancho real no se conoce hasta que el carrusel está en el documento.
+    const observer = new ResizeObserver(sync);
+    observer.observe(track);
+    carouselObservers.push(observer);
+    sync();
+
+    return carousel;
+  }
+
+  function buildCarouselArrow(dir, glifo, label) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'carousel-nav ' + dir;
+    btn.setAttribute('aria-label', label);
+    btn.textContent = glifo;
+    return btn;
+  }
+
+  // Inicio: una sección por tipo, cada una con su carrusel y su "Ver más".
+  function renderSections(secciones) {
+    clearCarousels();
     sectionsEl.innerHTML = '';
-    emptyState.hidden = list.length > 0;
 
-    SECTION_ORDER.forEach((type) => {
-      const items = list.filter((s) => s.ContentType === type);
-      if (!items.length) return;
-
+    secciones.forEach(({ type, items, total }) => {
       const section = document.createElement('section');
       section.className = 'type-section';
+
       const head = document.createElement('div');
       head.className = 'type-section-head';
       head.innerHTML = `
         <h3>${getContentTypeMeta(type).section}</h3>
-        <span class="type-count">${items.length}</span>
-        <button class="btn btn-ghost type-section-all" type="button">Ver todo</button>`;
-      head.querySelector('.type-section-all').addEventListener('click', () => applyContentType(type));
-
-      const sectionGrid = document.createElement('div');
-      sectionGrid.className = 'grid';
-      items.forEach((s) => sectionGrid.appendChild(buildCard(s)));
+        <span class="type-count">${total}</span>
+        <button class="btn btn-ghost type-section-all" type="button">Ver más</button>`;
+      head.querySelector('.type-section-all').addEventListener('click', () => openBrowse(type));
 
       section.appendChild(head);
-      section.appendChild(sectionGrid);
+      section.appendChild(buildCarousel(items));
       sectionsEl.appendChild(section);
     });
   }
 
-  // Punto único para cambiar de tipo: el select y los enlaces del menú
-  // tienen que quedar siempre reflejando lo mismo.
-  function applyContentType(type) {
-    state.contentType = type || '';
-    state.view = 'home';
+  // ---------- Paginación ----------
+  // Ventana de páginas alrededor de la actual, siempre con la primera y la
+  // última, para que la barra no crezca con el catálogo.
+  function pageWindow(current, totalPages) {
+    const paginas = new Set([1, totalPages]);
+    for (let p = current - 1; p <= current + 1; p += 1) {
+      if (p >= 1 && p <= totalPages) paginas.add(p);
+    }
+    const orden = [...paginas].sort((a, b) => a - b);
+    return orden.flatMap((p, i) => (i && p - orden[i - 1] > 1 ? ['…', p] : [p]));
+  }
+
+  function renderPagination(total, totalPages) {
+    paginationEl.innerHTML = '';
+    paginationEl.hidden = totalPages <= 1;
+    if (totalPages <= 1) return;
+
+    const irA = (p) => {
+      state.page = p;
+      loadCatalog();
+      browseEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    const flecha = (label, destino, activa) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'page-btn page-step';
+      btn.textContent = label;
+      btn.disabled = !activa;
+      if (activa) btn.addEventListener('click', () => irA(destino));
+      return btn;
+    };
+
+    paginationEl.appendChild(flecha('‹ Anterior', state.page - 1, state.page > 1));
+
+    const numeros = document.createElement('div');
+    numeros.className = 'page-numbers';
+    pageWindow(state.page, totalPages).forEach((p) => {
+      if (p === '…') {
+        const hueco = document.createElement('span');
+        hueco.className = 'page-gap';
+        hueco.textContent = '…';
+        numeros.appendChild(hueco);
+        return;
+      }
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'page-btn' + (p === state.page ? ' active' : '');
+      btn.textContent = p;
+      if (p === state.page) btn.setAttribute('aria-current', 'page');
+      else btn.addEventListener('click', () => irA(p));
+      numeros.appendChild(btn);
+    });
+    paginationEl.appendChild(numeros);
+
+    // En pantalla estrecha los números se ocultan y queda este contador.
+    const resumen = document.createElement('span');
+    resumen.className = 'page-summary';
+    resumen.textContent = `${state.page} / ${totalPages}`;
+    paginationEl.appendChild(resumen);
+
+    paginationEl.appendChild(flecha('Siguiente ›', state.page + 1, state.page < totalPages));
+  }
+
+  // ---------- Cambios de filtro / vista ----------
+  // Los selectores viven en dos sitios (barra superior y listado): el estado es
+  // el único origen de verdad y de aquí salen los dos.
+  function syncFilterInputs() {
     $('contentTypeFilter').value = state.contentType;
+    $('browseType').value = state.contentType;
+    $('genreFilter').value = state.genre;
+    $('browseGenre').value = state.genre;
+    // Sólo se toca el buscador si de verdad quedó desfasado: reescribirlo
+    // mientras se teclea mueve el cursor al final.
+    if ($('searchInput').value.trim() !== state.search) $('searchInput').value = state.search;
+  }
+
+  function render() {
+    syncFilterInputs();
     syncNav();
-    $('sectionTitle').textContent = getSectionTitle();
     loadCatalog();
+  }
+
+  // "Ver más" y los enlaces de tipo del menú: abren el listado completo.
+  function openBrowse(type) {
+    state.view = 'browse';
+    state.contentType = type || '';
+    state.page = 1;
+    render();
+  }
+
+  // Un filtro desde el inicio manda al listado; dentro de Mi Lista se queda ahí.
+  function applyFilter(campo, valor) {
+    state[campo] = valor || '';
+    state.page = 1;
+    if (state.view === 'home') state.view = 'browse';
+    else if (state.view === 'browse' && !state.search && !state.genre && !state.contentType) state.view = 'home';
+    render();
   }
 
   function syncNav() {
     document.querySelectorAll('.nav-links a').forEach((link) => {
-      const isType = link.dataset.type && link.dataset.type === state.contentType;
-      const isHome = link.dataset.view === 'home' && state.view === 'home' && !state.contentType;
+      const isType = link.dataset.type && state.view === 'browse' && link.dataset.type === state.contentType;
+      const isHome = link.dataset.view === 'home' && state.view === 'home';
       const isList = link.dataset.view === 'mylist' && state.view === 'mylist';
       link.classList.toggle('active', Boolean(isType || isHome || isList));
     });
@@ -345,39 +535,51 @@
   function switchView(view) {
     if (view === 'mylist' && !API.getToken()) { openAuth('login'); return; }
     state.view = view;
-    // "Inicio" vuelve a la vista sin filtrar, que es donde se ve todo separado.
+    state.page = 1;
+    // "Inicio" vuelve a la portada limpia, que es donde están los carruseles.
     if (view === 'home') {
       state.contentType = '';
-      $('contentTypeFilter').value = '';
+      state.genre = '';
+      state.search = '';
     }
-    syncNav();
-    $('sectionTitle').textContent = getSectionTitle();
-    loadCatalog();
+    render();
   }
   document.querySelectorAll('[data-view]').forEach((a) =>
     a.addEventListener('click', (e) => { e.preventDefault(); switchView(a.dataset.view); }));
   document.querySelectorAll('[data-type]').forEach((a) =>
-    a.addEventListener('click', (e) => { e.preventDefault(); applyContentType(a.dataset.type); }));
+    a.addEventListener('click', (e) => { e.preventDefault(); openBrowse(a.dataset.type); }));
 
-  // ---------- Buscador y filtro ----------
+  // ---------- Buscador y filtros ----------
   let searchTimer = null;
   $('searchInput').addEventListener('input', (e) => {
-    state.search = e.target.value.trim();
+    const texto = e.target.value.trim();
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(loadCatalog, 300);
+    searchTimer = setTimeout(() => applyFilter('search', texto), 300);
   });
-  $('contentTypeFilter').addEventListener('change', (e) => applyContentType(e.target.value));
-  $('genreFilter').addEventListener('change', (e) => { state.genre = e.target.value; loadCatalog(); });
+  $('contentTypeFilter').addEventListener('change', (e) => applyFilter('contentType', e.target.value));
+  $('browseType').addEventListener('change', (e) => applyFilter('contentType', e.target.value));
+  $('genreFilter').addEventListener('change', (e) => applyFilter('genre', e.target.value));
+  $('browseGenre').addEventListener('change', (e) => applyFilter('genre', e.target.value));
+  $('clearFilters').addEventListener('click', () => {
+    state.search = '';
+    state.genre = '';
+    state.contentType = '';
+    state.page = 1;
+    if (state.view === 'browse') state.view = 'home';
+    render();
+  });
 
   async function loadGenres() {
     try {
       const genres = await API.genres();
-      const sel = $('genreFilter');
+      const selects = [$('genreFilter'), $('browseGenre')];
       genres.forEach((g) => {
-        const opt = document.createElement('option');
-        opt.value = g.Name;
-        opt.textContent = g.Name;
-        sel.appendChild(opt);
+        selects.forEach((sel) => {
+          const opt = document.createElement('option');
+          opt.value = g.Name;
+          opt.textContent = g.Name;
+          sel.appendChild(opt);
+        });
       });
     } catch { /* silencioso */ }
   }
@@ -386,7 +588,7 @@
   async function init() {
     refreshAuthUI();
     await Promise.all([loadGenres(), refreshMyListIds()]);
-    loadCatalog();
+    render();
   }
   init();
 })();

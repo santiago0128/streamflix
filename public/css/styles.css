@@ -220,6 +220,8 @@ button { font-family: inherit; cursor: pointer; }
   .hero-content h1 { font-size: 32px; }
   .content { padding: 20px 18px 70px; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+  .carousel { --card-w: 140px; }
+  .carousel-track { gap: 12px; }
   .episode-thumb { width: 84px; }
   .player-controls { padding: 14px 16px 16px; }
   .ep-quick-select { max-width: 130px; }
@@ -251,7 +253,82 @@ button { font-family: inherit; cursor: pointer; }
   font-size: 12px; color: #b6b6c0; background: rgba(255, 255, 255, 0.08);
   border-radius: 999px; padding: 2px 9px;
 }
-.type-section-all { margin-left: auto; font-size: 13px; padding: 5px 12px; }
+.type-section-all { margin-left: auto; font-size: 13px; padding: 5px 12px; flex: none; }
+
+/* ===================== CARRUSELES DEL INICIO ===================== */
+/* Cada tipo enseña sus 10 primeros en una fila que se desliza. La rejilla se
+   reserva para el listado completo, donde sí hay que ver todo de golpe. */
+.carousel { position: relative; --card-w: 180px; }
+.carousel-track {
+  display: grid; grid-auto-flow: column; grid-auto-columns: var(--card-w);
+  gap: 18px; overflow-x: auto; scroll-snap-type: x proximity; scroll-behavior: smooth;
+  /* Hueco para que el hover de la tarjeta no quede cortado por el desbordamiento:
+     al desplazarse en horizontal el navegador recorta también en vertical. */
+  padding: 8px 2px 14px;
+  /* Sin esto, al llegar al final del carrusel el gesto sigue en la página (y en
+     iOS puede disparar el "volver atrás"). */
+  overscroll-behavior-x: contain;
+  scrollbar-width: none; -ms-overflow-style: none;
+}
+.carousel-track::-webkit-scrollbar { display: none; }
+.carousel-track > .card { scroll-snap-align: start; }
+
+.carousel-nav {
+  position: absolute; top: 0; bottom: 14px; z-index: 3; width: 44px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; color: var(--text); font-size: 30px; line-height: 1;
+  background: linear-gradient(90deg, rgba(11,11,15,.92), rgba(11,11,15,0));
+  opacity: 0; transition: opacity .18s;
+}
+.carousel-nav.next { right: 0; transform: scaleX(-1); }
+.carousel-nav.prev { left: 0; }
+.carousel:hover .carousel-nav { opacity: 1; }
+.carousel-nav:hover { background: linear-gradient(90deg, rgba(11,11,15,.98), rgba(11,11,15,.2)); }
+.carousel-nav:disabled { opacity: 0 !important; pointer-events: none; }
+/* Si cabe entero no hay nada que desplazar. */
+.carousel.no-scroll .carousel-nav { display: none; }
+
+/* En táctil se arrastra con el dedo: las flechas sólo estorban. */
+@media (hover: none) {
+  .carousel-nav { display: none; }
+}
+
+/* ===================== LISTADO COMPLETO ===================== */
+.browse-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.browse-head .section-title { margin-bottom: 0; min-width: 0; overflow-wrap: anywhere; }
+.browse-count { font-size: 13px; color: var(--muted); }
+
+.filter-bar {
+  display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+  padding: 14px; margin-bottom: 22px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.filter-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.filter-field span { font-size: 12px; color: var(--muted); }
+.filter-field select {
+  background: var(--card); border: 1px solid var(--border); color: var(--text);
+  padding: 9px 12px; border-radius: 8px; font-size: 14px; outline: none; cursor: pointer;
+  min-width: 160px; max-width: 100%;
+}
+.filter-field select:focus { border-color: var(--accent); }
+.filter-field option { background: var(--bg-elev); }
+.filter-clear { margin-left: auto; font-size: 13px; }
+
+/* ===================== PAGINACIÓN ===================== */
+.pagination { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 32px; flex-wrap: wrap; }
+.page-numbers { display: flex; align-items: center; gap: 6px; }
+.page-btn {
+  min-width: 40px; height: 40px; padding: 0 12px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 14px; font-weight: 600;
+  transition: background .15s, border-color .15s;
+}
+.page-btn:hover:not(:disabled) { border-color: var(--text); }
+.page-btn.active { background: var(--accent); border-color: var(--accent); }
+.page-btn:disabled { opacity: .4; cursor: default; }
+.page-gap { color: var(--muted); padding: 0 2px; }
+/* El resumen "3 / 12" sustituye a los números cuando no caben. */
+.page-summary { display: none; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* --- Teléfonos -------------------------------------------------------- */
 /* El corte de 820px cubre tablets. En un móvil de 360px la rejilla sigue
@@ -280,6 +357,25 @@ button { font-family: inherit; cursor: pointer; }
   .card-body { padding: 8px 8px 10px; }
   .card-title { font-size: 13px; }
   .card-genres { font-size: 11px; }
+
+  .type-section { margin-bottom: 26px; }
+  .type-section-head { gap: 8px; margin-bottom: 10px; }
+  .type-section-head h3 { font-size: 17px; }
+  .type-section-all { padding: 5px 10px; min-height: 34px; }
+  .carousel { --card-w: 116px; }
+  .carousel-track { gap: 10px; padding: 6px 2px 10px; }
+
+  /* Los dos filtros ocupan media fila cada uno en vez de apilarse. */
+  .filter-bar { gap: 10px; padding: 12px; margin-bottom: 16px; }
+  .filter-field { flex: 1 1 140px; }
+  .filter-field select { min-width: 0; width: 100%; min-height: 44px; }
+  .filter-clear { flex: 1 1 100%; margin-left: 0; }
+
+  /* Con los números no cabe: se deja el paso a paso y el contador. */
+  .pagination { gap: 10px; margin-top: 24px; }
+  .page-numbers { display: none; }
+  .page-summary { display: inline; }
+  .page-step { flex: 1 1 0; min-height: 44px; }
 
   /* La ficha pasa a pantalla completa. */
   .modal { padding: 0; }
@@ -349,10 +445,32 @@ button { font-family: inherit; cursor: pointer; }
     background: var(--bg-elev); border-left: 1px solid var(--border);
     padding: calc(18px + env(safe-area-inset-top)) 18px calc(18px + env(safe-area-inset-bottom));
     height: 100dvh;
-    transform: translateX(100%); transition: transform .22s ease;
     z-index: 70; overflow-y: auto;
+
+    /* Cerrado se quita del todo, y esto es lo que de verdad mata la barra de
+       desplazamiento horizontal. No basta con `visibility: hidden` ni con
+       recortar en <html>: el panel es `fixed`, así que su bloque contenedor es
+       el viewport y se escapa de cualquier recorte del documento. Estando
+       desplazado un 100% a la derecha, seguía sumando su ancho al área
+       desplazable de la página.
+       De paso, cerrado tampoco lo alcanzan el tabulador ni el lector de
+       pantalla. */
+    display: none;
+    transform: translateX(100%);
   }
-  body.menu-open .nav-right { transform: none; }
+
+  /* La transición se declara en el estado abierto a propósito: al cerrar
+     desaparece con la clase, el panel se oculta en el acto y no queda ni un
+     instante asomando fuera de la pantalla. Al abrir, `@starting-style` da el
+     punto de partida para que entre deslizándose. */
+  body.menu-open .nav-right {
+    display: flex;
+    transform: none;
+    transition: transform .22s ease;
+  }
+  @starting-style {
+    body.menu-open .nav-right { transform: translateX(100%); }
+  }
 
   /* Fondo oscuro detrás del panel. */
   body.menu-open::before {
@@ -371,7 +489,23 @@ button { font-family: inherit; cursor: pointer; }
   .auth-area, .auth-area .btn { width: 100%; }
 }
 
-/* El panel vive fuera de pantalla hasta que se abre, y eso ensancha el
-   documento: aparecia una barra de desplazamiento horizontal en toda la
-   pagina. Nada aqui debe desbordar a lo ancho. */
-html, body { max-width: 100%; overflow-x: hidden; }
+/* Red de seguridad contra el desbordamiento horizontal: aquí sólo caen los
+   casos normales (un título largo sin espacios, una imagen ancha). Al panel del
+   menú, que era la causa real de la barra horizontal en móvil, esto NO le
+   afecta: es `fixed` y se escapa del recorte del documento, así que se resuelve
+   en su propia regla ocultándolo del todo mientras está cerrado.
+
+   El recorte va SOLO en <html>, y con `clip` por delante de `hidden`:
+   - en <body>, `overflow-x: hidden` lo convierte en contenedor de scroll y eso
+     rompe el `position: sticky` de la barra superior, que dejaba de quedarse
+     arriba al bajar;
+   - `clip` recorta sin crear contenedor de scroll, así que el sticky sigue
+     funcionando. `hidden` queda de respaldo para navegadores sin `clip`.
+
+   Los carruseles sí se desplazan en horizontal, pero cada uno dentro de su
+   propia pista: la página en sí, nunca. */
+html {
+  overflow-x: hidden;
+  overflow-x: clip;
+}
+body { max-width: 100%; }

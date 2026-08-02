@@ -165,31 +165,72 @@ router.get('/content-types', async (_req, res) => {
   ]);
 });
 
-// GET /api/series?search=&genre=   -> catálogo con búsqueda y filtro por género
+const MAX_PAGE_SIZE = 100;
+const DEFAULT_PAGE_SIZE = 24;
+
+const SERIES_COLUMNS = `
+  s.Id, s.Title, s.Description, s.PosterUrl, s.BackdropUrl, s.ReleaseYear, s.Rating,
+  s.ContentType,
+  (SELECT STRING_AGG(g.Name, ', ')
+     FROM dbo.SeriesGenres sg JOIN dbo.Genres g ON g.Id = sg.GenreId
+    WHERE sg.SeriesId = s.Id) AS Genres`;
+
+const SERIES_WHERE = `
+  (@search IS NULL OR s.Title LIKE '%' + @search + '%')
+  AND (@type   IS NULL OR s.ContentType = @type)
+  AND (@genre  IS NULL OR EXISTS (
+        SELECT 1 FROM dbo.SeriesGenres sg JOIN dbo.Genres g ON g.Id = sg.GenreId
+         WHERE sg.SeriesId = s.Id AND g.Name = @genre))`;
+
+// GET /api/series?search=&genre=&type=&page=&pageSize=
+// Sin `page` devuelve el catálogo entero, como siempre. Con `page` devuelve una
+// página y el total, que es lo que piden los carruseles del inicio (10 por tipo)
+// y el listado paginado.
 router.get('/series', async (req, res) => {
   const search = (req.query.search || '').trim() || null;
   const genre = (req.query.genre || '').trim() || null;
   const type = (req.query.type || '').trim() || null;
+
+  const paginado = req.query.page !== undefined;
+  const page = Math.max(1, Math.trunc(Number(req.query.page)) || 1);
+  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(Number(req.query.pageSize)) || DEFAULT_PAGE_SIZE));
+
   try {
     const pool = await getPool();
-    const result = await pool.request()
+    const request = pool.request()
       .input('search', sql.NVarChar, search)
       .input('genre', sql.NVarChar, genre)
-      .input('type', sql.NVarChar, type)
+      .input('type', sql.NVarChar, type);
+
+    if (!paginado) {
+      const result = await request.query(
+        `SELECT ${SERIES_COLUMNS} FROM dbo.Series s WHERE ${SERIES_WHERE} ORDER BY s.Title`);
+      return res.json(result.recordset);
+    }
+
+    // El total va en su propia consulta a proposito: con COUNT(*) OVER() una
+    // pagina fuera de rango no devuelve filas y el total se perderia con ellas,
+    // que es justo cuando el cliente necesita saber a que pagina volver.
+    const result = await request
+      .input('offset', sql.Int, (page - 1) * pageSize)
+      .input('pageSize', sql.Int, pageSize)
       .query(`
-        SELECT s.Id, s.Title, s.Description, s.PosterUrl, s.BackdropUrl, s.ReleaseYear, s.Rating,
-               s.ContentType,
-               (SELECT STRING_AGG(g.Name, ', ')
-                  FROM dbo.SeriesGenres sg JOIN dbo.Genres g ON g.Id = sg.GenreId
-                 WHERE sg.SeriesId = s.Id) AS Genres
+        SELECT COUNT(*) AS Total FROM dbo.Series s WHERE ${SERIES_WHERE};
+
+        SELECT ${SERIES_COLUMNS}
           FROM dbo.Series s
-         WHERE (@search IS NULL OR s.Title LIKE '%' + @search + '%')
-           AND (@type   IS NULL OR s.ContentType = @type)
-           AND (@genre  IS NULL OR EXISTS (
-                 SELECT 1 FROM dbo.SeriesGenres sg JOIN dbo.Genres g ON g.Id = sg.GenreId
-                  WHERE sg.SeriesId = s.Id AND g.Name = @genre))
-         ORDER BY s.Title`);
-    res.json(result.recordset);
+         WHERE ${SERIES_WHERE}
+         ORDER BY s.Title
+        OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;`);
+
+    const total = result.recordsets[0][0].Total;
+    res.json({
+      items: result.recordsets[1],
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al obtener series' });
