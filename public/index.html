@@ -159,6 +159,17 @@
       <!-- Indicador de carga: sin esto, en móvil parece que no pasa nada -->
       <div class="player-spinner" id="playerSpinner" hidden><div class="spinner-ring"></div></div>
 
+      <!-- Los enlaces importados llevan token y caducan. Cuando eso pasa hay que
+           decirlo: girar indefinidamente parece que la aplicación se colgó. -->
+      <div class="player-error" id="playerError" hidden>
+        <p class="player-error-title" id="playerErrorTitle">No se pudo reproducir</p>
+        <p class="player-error-desc" id="playerErrorDesc"></p>
+        <div class="player-error-actions">
+          <button class="btn btn-secondary" id="playerErrorRetry">Reintentar</button>
+          <button class="btn btn-secondary" id="playerErrorNext">Siguiente capítulo ▶</button>
+        </div>
+      </div>
+
       <!-- Botones contextuales -->
       <button class="skip-btn" id="skipIntroBtn" hidden>Saltar intro ⏭</button>
       <button class="skip-btn next-ep" id="nextEpBtn" hidden>Siguiente episodio ▶</button>

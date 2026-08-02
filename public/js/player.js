@@ -31,6 +31,11 @@ const Player = (() => {
   const btnFwd10 = document.getElementById('btnFwd10');
   const iconPlay = btnPlayBig.querySelector('.icon-play');
   const iconPause = btnPlayBig.querySelector('.icon-pause');
+  const playerError = document.getElementById('playerError');
+  const playerErrorTitle = document.getElementById('playerErrorTitle');
+  const playerErrorDesc = document.getElementById('playerErrorDesc');
+  const playerErrorRetry = document.getElementById('playerErrorRetry');
+  const playerErrorNext = document.getElementById('playerErrorNext');
   const btnSettings = document.getElementById('btnSettings');
   const settingsPanel = document.getElementById('settingsPanel');
   const optAutoSkipIntro = document.getElementById('optAutoSkipIntro');
@@ -201,13 +206,57 @@ const Player = (() => {
       hls.loadSource(url);
       hls.attachMedia(video);
       hls.on(window.Hls.Events.MANIFEST_PARSED, () => { if (onReady) onReady(); });
+
+      // Los reintentos van contados. Antes, un error de red disparaba
+      // startLoad() sin límite: con un enlace caducado (el origen responde 403 y
+      // el proxy devuelve 502) eso son reintentos infinitos, y desde fuera se ve
+      // como un vídeo que "carga" eternamente. Es el fallo más común del
+      // catálogo, porque las URLs importadas llevan token y caducan.
+      let reintentos = 0;
       hls.on(window.Hls.Events.ERROR, (_evt, data) => {
         if (!data.fatal) return;
-        // Los errores fatales de red/media son recuperables una vez.
-        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-        else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-        else { hls.destroy(); hls = null; }
+
+        const codigo = data.response && data.response.code;
+        // Si el manifiesto no carga, `startLoad()` no sirve de nada: esa llamada
+        // reanuda la carga de fragmentos, y sin manifiesto no hay fragmentos que
+        // reanudar. El resultado era un único error y el vídeo girando para
+        // siempre. Un manifiesto se reintenta volviendo a pedir la fuente.
+        if (/manifest/i.test(data.details || '')) {
+          // Con una respuesta del servidor (502 por enlace caducado, 404...)
+          // reintentar es perder el tiempo: da igual cuántas veces se pida.
+          if (!codigo && reintentos < 1) {
+            reintentos += 1;
+            hls.loadSource(url);
+            return;
+          }
+          return fallo(codigo);
+        }
+
+        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR && reintentos < 2) {
+          reintentos += 1;
+          hls.startLoad();
+          return;
+        }
+        if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR && reintentos < 2) {
+          reintentos += 1;
+          hls.recoverMediaError();
+          return;
+        }
+        fallo(codigo);
       });
+
+      // El proxy traduce a 502 el 403 del origen, que es como se manifiesta un
+      // enlace caducado: el caso más común con diferencia.
+      function fallo(codigo) {
+        const caducado = codigo === 502 || codigo === 403;
+        mostrarError(
+          caducado ? 'El enlace de este capítulo caducó' : 'No se pudo reproducir este capítulo',
+          caducado
+            ? 'Las URLs importadas llevan un token que expira. Hay que volver a importar el capítulo para refrescarlo.'
+            : 'El origen del vídeo no respondió.'
+        );
+        if (hls) { hls.destroy(); hls = null; }
+      }
       return;
     }
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -248,6 +297,7 @@ const Player = (() => {
     }
 
     setEmbedMode(false);
+    ocultarError();
     playerSpinner.hidden = false;  // hasta que llegue el primer fotograma
     if (provider === 'hls') {
       // Con HLS hay que esperar: loadSource/attachMedia son asíncronos y un
@@ -354,6 +404,29 @@ const Player = (() => {
   video.addEventListener('seeking', () => mostrarCarga(true));
   ['playing', 'canplay', 'seeked', 'error'].forEach((ev) =>
     video.addEventListener(ev, () => mostrarCarga(false)));
+
+  // Los episodios que no son HLS (Provider 'file') no pasan por hls.js, así que
+  // su fallo llega por aquí y hay que contarlo igual.
+  video.addEventListener('error', () => {
+    if (providerOf(current()) === 'hls') return;  // de eso ya se encarga hls.js
+    mostrarError('No se pudo reproducir este capítulo',
+      'El origen del vídeo no respondió. Si se importó hace tiempo, es probable que el enlace haya caducado.');
+  });
+
+  // ---- Aviso de fallo ----
+  function mostrarError(titulo, detalle) {
+    playerSpinner.hidden = true;
+    playerErrorTitle.textContent = titulo;
+    playerErrorDesc.textContent = detalle || '';
+    playerErrorNext.hidden = !hasNext();
+    playerError.hidden = false;
+    stage.classList.remove('hide-ui');
+    clearTimeout(hideTimer);
+  }
+  function ocultarError() { playerError.hidden = true; }
+
+  playerErrorRetry.addEventListener('click', () => { ocultarError(); load(); });
+  playerErrorNext.addEventListener('click', () => { ocultarError(); next(); });
 
   function syncPlayIcon(reproduciendo) {
     iconPlay.hidden = reproduciendo;
