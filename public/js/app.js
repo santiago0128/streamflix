@@ -483,8 +483,24 @@
   }
 
   function buildHeroSlides(sections) {
-    const source = dedupeById(sections.flatMap((section) => section.items));
-    return source.slice(0, 6);
+    const MAX_HERO_SLIDES = 6;
+    const buckets = sections
+      .map((section) => dedupeById((section.items || []).filter((item) => item.BackdropUrl || item.PosterUrl)))
+      .filter((items) => items.length);
+
+    const slides = [];
+    let cursor = 0;
+
+    while (buckets.some((items) => items.length) && slides.length < MAX_HERO_SLIDES) {
+      const bucket = buckets[cursor % buckets.length];
+      const next = bucket.shift();
+      if (next && !slides.some((item) => item.Id === next.Id)) {
+        slides.push(next);
+      }
+      cursor += 1;
+    }
+
+    return slides;
   }
 
   function stopHeroRotation() {
