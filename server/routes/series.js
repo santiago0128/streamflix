@@ -5,6 +5,7 @@ const express = require('express');
 const { sql, getPool } = require('../db');
 
 const router = express.Router();
+const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
 // Los CDN de los que salen los episodios importados no mandan CORS, así que el
 // video se sirve por este proxy. Para HLS no basta con el playlist: sus
@@ -132,6 +133,14 @@ function getHttpClient(url) {
   return url.startsWith('https:') ? https : http;
 }
 
+function normalizeUrl(url, baseUrl) {
+  try {
+    return new URL(url, baseUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
 function isRedirectStatus(statusCode) {
   return [301, 302, 303, 307, 308].includes(statusCode);
 }
@@ -173,6 +182,278 @@ function requestUpstream(url, headers = {}, redirectCount = 0) {
     upstream.on('error', reject);
     upstream.end();
   });
+}
+
+function requestText(url, headers = {}, redirectCount = 0) {
+  if (redirectCount > 8) {
+    return Promise.reject(new Error(`Demasiadas redirecciones para ${url}`));
+  }
+
+  return new Promise((resolve, reject) => {
+    const client = getHttpClient(url);
+    const upstream = client.request(
+      url,
+      {
+        method: 'GET',
+        headers: {
+          'User-Agent': USER_AGENT,
+          ...headers
+        }
+      },
+      (response) => {
+        if (response.statusCode && isRedirectStatus(response.statusCode) && response.headers.location) {
+          const redirectedUrl = normalizeUrl(response.headers.location, url);
+          response.resume();
+
+          if (!redirectedUrl) {
+            reject(new Error(`No pude resolver la redirección de ${url}`));
+            return;
+          }
+
+          requestText(redirectedUrl, headers, redirectCount + 1).then(resolve).catch(reject);
+          return;
+        }
+
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => {
+          body += chunk;
+        });
+        response.on('end', () => {
+          resolve({
+            url,
+            finalUrl: url,
+            statusCode: response.statusCode || null,
+            headers: response.headers,
+            body
+          });
+        });
+      }
+    );
+
+    upstream.on('error', reject);
+    upstream.end();
+  });
+}
+
+function isVideoContentType(contentType) {
+  if (!contentType) {
+    return false;
+  }
+
+  return /^video\//i.test(contentType)
+    || /^application\/octet-stream/i.test(contentType)
+    || /^application\/vnd\.apple\.mpegurl/i.test(contentType)
+    || /^application\/x-mpegurl/i.test(contentType);
+}
+
+async function probeVideoUrl(url, extraHeaders = {}) {
+  if (!url) {
+    return null;
+  }
+
+  const normalizedUrl = normalizeUrl(url);
+  if (!normalizedUrl) {
+    return null;
+  }
+
+  const probes = [
+    { method: 'HEAD', headers: { Accept: '*/*', ...extraHeaders } },
+    { method: 'GET', headers: { Accept: '*/*', Range: 'bytes=0-1', ...extraHeaders } }
+  ];
+
+  for (const probe of probes) {
+    try {
+      const client = getHttpClient(normalizedUrl);
+      const result = await new Promise((resolve, reject) => {
+        const req = client.request(
+          normalizedUrl,
+          {
+            method: probe.method,
+            headers: {
+              'User-Agent': USER_AGENT,
+              ...probe.headers
+            }
+          },
+          (response) => {
+            if (response.statusCode && isRedirectStatus(response.statusCode) && response.headers.location) {
+              response.resume();
+              resolve({ redirect: normalizeUrl(response.headers.location, normalizedUrl) });
+              return;
+            }
+
+            const contentType = response.headers['content-type'] || '';
+            if ((response.statusCode === 200 || response.statusCode === 206) && isVideoContentType(contentType)) {
+              resolve({
+                ok: true,
+                url: normalizedUrl,
+                statusCode: response.statusCode,
+                contentType
+              });
+              response.resume();
+              return;
+            }
+
+            response.resume();
+            resolve({ ok: false });
+          }
+        );
+
+        req.on('error', reject);
+        req.end();
+      });
+
+      if (result?.redirect) {
+        const redirected = await probeVideoUrl(result.redirect, extraHeaders);
+        if (redirected) return redirected;
+      }
+
+      if (result?.ok) {
+        return result;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function decodeHtml(value) {
+  return String(value || '')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function extractMediaUrlsFromHtml(html, pageUrl) {
+  const candidates = [];
+  const seen = new Set();
+  const patterns = [
+    /player\.src\(\s*\{\s*type:\s*"video\/[^"]+"\s*,\s*src:\s*"([^"]+)"/gi,
+    /file:\s*"([^"]+\.(?:mp4|webm|m3u8|mov)(?:\?[^"]*)?)"/gi,
+    /sources?\s*:\s*\[\s*\{\s*file:\s*"([^"]+)"/gi,
+    /<source[^>]+src="([^"]+)"/gi,
+    /https?:\/\/[^"'\\\s]+?\.(?:mp4|webm|m3u8|mov)(?:\?[^"'\\\s]*)?/gi
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of html.matchAll(pattern)) {
+      const rawValue = match[1] || match[0];
+      const candidate = normalizeUrl(decodeHtml(rawValue), pageUrl);
+      if (!candidate) continue;
+      const key = candidate.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      candidates.push(candidate);
+    }
+  }
+
+  return candidates;
+}
+
+function unpackPackedScript(source) {
+  const match = source.match(
+    /eval\(function\(p,a,c,k,e,[dr]\)\{.*?\}\('(.*?)',(\d+),(\d+),'(.*?)'\.split\('\|'\)/s
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const payload = match[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+  const radix = Number(match[2]);
+  const count = Number(match[3]);
+  const dictionary = match[4].split('|');
+
+  const encode = (value) =>
+    (value < radix ? '' : encode(Math.floor(value / radix))) +
+    ((value = value % radix) > 35 ? String.fromCharCode(value + 29) : value.toString(36));
+
+  let unpacked = payload;
+  for (let i = count - 1; i >= 0; i -= 1) {
+    if (dictionary[i]) {
+      unpacked = unpacked.replace(new RegExp(`\\b${encode(i)}\\b`, 'g'), dictionary[i]);
+    }
+  }
+
+  return unpacked;
+}
+
+function extractPlayerMediaUrls(html, pageUrl) {
+  const unpacked = unpackPackedScript(html);
+  const urls = [];
+
+  if (unpacked) {
+    const linksBlock = unpacked.match(/var\s+links\s*=\s*(\{[\s\S]*?\})\s*;/);
+    if (linksBlock) {
+      try {
+        const links = JSON.parse(linksBlock[1]);
+        for (const key of ['hls4', 'hls3', 'hls2', 'hls', 'mp4']) {
+          if (links[key]) urls.push(links[key]);
+        }
+      } catch {
+        // Si el bloque no es JSON válido, se cae a los patrones de abajo.
+      }
+    }
+
+    for (const match of unpacked.matchAll(/(?:file|src)\s*:\s*"([^"]+)"/g)) {
+      urls.push(match[1]);
+    }
+    urls.push(...extractMediaUrlsFromHtml(unpacked, pageUrl));
+  }
+
+  urls.push(...extractMediaUrlsFromHtml(html, pageUrl));
+
+  const seen = new Set();
+  return urls
+    .map((url) => normalizeUrl(url, pageUrl))
+    .filter((url) => {
+      if (!url || !/\.(m3u8|mp4|webm|mov)(?:$|\?)/i.test(url) || seen.has(url)) return false;
+      seen.add(url);
+      return true;
+    });
+}
+
+async function fetchPlayerMediaUrls(embedUrl, pageUrl) {
+  const attempts = [{ Accept: 'text/html,application/xhtml+xml', Referer: pageUrl }, { Accept: 'text/html,application/xhtml+xml' }];
+
+  for (const headers of attempts) {
+    const response = await requestText(embedUrl, headers);
+    const urls = extractPlayerMediaUrls(response.body, embedUrl);
+    if (urls.length) return urls;
+  }
+
+  return [];
+}
+
+async function refreshVideoSourceFromSnapshot(snapshot) {
+  const embedCandidates = [snapshot?.VideoSrcReferer, snapshot?.VerifiedVideoReferer]
+    .filter(Boolean)
+    .filter((url, index, arr) => arr.indexOf(url) === index)
+    .filter((url) => !/\.(m3u8|mp4|webm|mov)(?:$|\?)/i.test(url));
+
+  for (const embedUrl of embedCandidates) {
+    try {
+      const mediaUrls = await fetchPlayerMediaUrls(embedUrl, snapshot?.EpisodePageUrl || embedUrl);
+      for (const mediaUrl of mediaUrls) {
+        const verified = await probeVideoUrl(mediaUrl, { Referer: embedUrl });
+        if (verified) {
+          return {
+            url: verified.url,
+            referer: embedUrl,
+            contentType: verified.contentType
+          };
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 // GET /api/genres  -> lista de géneros para el filtro
@@ -350,7 +631,7 @@ async function findEpisodeSnapshot(pool, episode) {
         .input('episodeNumber', sql.Int, episode.EpisodeNumber)
         .input('seasonNumber', sql.Int, episode.SeasonNumber)
         .query(`
-          SELECT TOP 1 VideoSrcUrl, VideoSrcReferer, VerifiedVideoUrl, VerifiedVideoReferer
+          SELECT TOP 1 EpisodePageUrl, VideoSrcUrl, VideoSrcReferer, VerifiedVideoUrl, VerifiedVideoReferer
             FROM ${source.table}
            WHERE SeriesSlug = @slug
              AND EpisodeNumber = @episodeNumber
@@ -413,7 +694,7 @@ router.get('/episodes/:id/stream', async (req, res) => {
       return res.status(404).json({ error: 'No se encontró una fuente de video reproducible' });
     }
 
-    const selected = candidates[0];
+    let selected = candidates[0];
 
     // ?u= es una variante o un segmento de un playlist que este mismo proxy
     // reescribió; la firma es lo que impide pedirle cualquier URL de internet.
@@ -462,18 +743,38 @@ router.get('/episodes/:id/stream', async (req, res) => {
     if (req.headers.range && !req.query.u) forwardedHeaders.Range = req.headers.range;
     if (selected.referer) forwardedHeaders.Referer = selected.referer;
 
-    const { response: upstream, finalUrl } = await requestUpstream(target, forwardedHeaders);
+    let { response: upstream, finalUrl } = await requestUpstream(target, forwardedHeaders);
 
     // Un error del origen se reporta como error. Estos enlaces caducan (llevan
     // token), y antes la página de error acababa reescrita como si fuera un
     // playlist, con lo que el reproductor se quedaba en negro sin explicación.
     if (upstream.statusCode >= 400) {
       upstream.resume();
-      return res.status(502).json({
-        error: `El origen del video respondió ${upstream.statusCode}. ` +
-          'Es probable que el enlace haya caducado: vuelve a importar el capítulo.',
-        upstreamStatus: upstream.statusCode
-      });
+
+      // Algunos hosts (como Uqload) firman la URL final del m3u8 y la dejan
+      // caducar enseguida. Si el snapshot todavía conserva el embed del que
+      // salió, se vuelve a resolver aquí mismo para obtener un enlace fresco.
+      if (!req.query.u && snapshot) {
+        const refreshed = await refreshVideoSourceFromSnapshot(snapshot);
+        if (refreshed) {
+          selected = { url: refreshed.url, referer: refreshed.referer };
+          target = selected.url;
+          const retryHeaders = {
+            ...forwardedHeaders,
+            Referer: selected.referer
+          };
+          ({ response: upstream, finalUrl } = await requestUpstream(target, retryHeaders));
+        }
+      }
+
+      if (upstream.statusCode >= 400) {
+        upstream.resume();
+        return res.status(502).json({
+          error: `El origen del video respondió ${upstream.statusCode}. ` +
+            'Es probable que el enlace haya caducado: vuelve a importar el capítulo.',
+          upstreamStatus: upstream.statusCode
+        });
+      }
     }
 
     // Un playlist se reescribe entero antes de mandarlo: si no, hls.js pediría
@@ -491,6 +792,47 @@ router.get('/episodes/:id/stream', async (req, res) => {
         // Si pese a todo no es un playlist, se manda tal cual en vez de
         // inventarle segmentos.
         if (!isPlaylistResponse(upstream.headers['content-type'], body)) {
+          if (!req.query.u && snapshot) {
+            refreshVideoSourceFromSnapshot(snapshot)
+              .then(async (refreshed) => {
+                if (!refreshed) {
+                  res.status(502);
+                  return res.json({ error: 'El origen no devolvió un playlist válido; el enlace pudo caducar.' });
+                }
+
+                const retryHeaders = {
+                  ...forwardedHeaders,
+                  Referer: refreshed.referer
+                };
+                const retry = await requestUpstream(refreshed.url, retryHeaders);
+                const retryChunks = [];
+                retry.response.on('data', (chunk) => retryChunks.push(chunk));
+                retry.response.on('error', (error) => {
+                  if (!res.headersSent) res.status(502).json({ error: error.message });
+                });
+                retry.response.on('end', () => {
+                  const retryBody = Buffer.concat(retryChunks);
+                  if (!isPlaylistResponse(retry.response.headers['content-type'], retryBody)) {
+                    res.status(502);
+                    return res.json({ error: 'El origen no devolvió un playlist válido; el enlace pudo caducar.' });
+                  }
+
+                  const rewrittenRetry = rewritePlaylist(retryBody.toString('utf8'), retry.finalUrl, id);
+                  guardarPlaylist(refreshed.url, rewrittenRetry, retry.response.headers['content-type']);
+                  res.status(200);
+                  res.setHeader('content-type', retry.response.headers['content-type'] || 'application/vnd.apple.mpegurl');
+                  res.setHeader('cache-control', 'no-store');
+                  res.send(rewrittenRetry);
+                });
+              })
+              .catch((error) => {
+                if (!res.headersSent) {
+                  res.status(502).json({ error: error.message });
+                }
+              });
+            return;
+          }
+
           res.status(502);
           return res.json({ error: 'El origen no devolvió un playlist válido; el enlace pudo caducar.' });
         }
