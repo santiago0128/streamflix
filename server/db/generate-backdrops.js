@@ -15,6 +15,23 @@ const ANILIST_API = 'https://graphql.anilist.co';
 const TMDB_BASE_URL = 'https://www.themoviedb.org';
 const animeArtworkCache = new Map();
 const tmdbArtworkCache = new Map();
+const TMDB_TITLE_ALIASES = new Map([
+  ['interestelar', ['Interstellar']],
+  ['el padrino', ['The Godfather']],
+  ['el padrino 2', ['The Godfather Part II']],
+  ['el padrino 3', ['The Godfather Part III']],
+  ['matrix', ['The Matrix']],
+  ['gladiador', ['Gladiator']],
+  ['el rey leon', ['The Lion King']],
+  ['volver al futuro', ['Back to the Future']],
+  ['parque jurasico', ['Jurassic Park']],
+  ['la casa del dragon', ['House of the Dragon']],
+  ['el increible hulk', ['The Incredible Hulk']],
+  ['rick and morty', ['Rick and Morty']],
+  ['the office', ['The Office']],
+  ['stranger things', ['Stranger Things']],
+  ['chernobyl', ['Chernobyl']]
+]);
 
 function parseArgs(argv) {
   const args = { apply: false, force: false, ids: null };
@@ -64,6 +81,20 @@ function normalizeSearchTitle(title) {
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
+}
+
+function getTmdbSearchQueries(series) {
+  const title = String(series.Title || '').trim();
+  const normalized = normalizeSearchTitle(title);
+  const queries = [title];
+  const aliases = TMDB_TITLE_ALIASES.get(normalized) || [];
+  for (const alias of aliases) {
+    if (!queries.includes(alias)) queries.push(alias);
+  }
+  if (normalized && !queries.includes(normalized) && normalized !== title.toLowerCase()) {
+    queries.push(normalized);
+  }
+  return queries;
 }
 
 function postJson(url, payload) {
@@ -262,14 +293,22 @@ async function fetchTmdbArtwork(series) {
   }
 
   try {
-    const searchUrl = `${TMDB_BASE_URL}/search?query=${encodeURIComponent(series.Title)}`;
-    const searchHtml = await requestText(searchUrl);
-    const candidates = parseTmdbSearchResults(searchHtml)
-      .map((candidate) => ({
+    const queries = getTmdbSearchQueries(series);
+    const candidates = [];
+
+    for (let index = 0; index < queries.length; index += 1) {
+      const query = queries[index];
+      const searchUrl = `${TMDB_BASE_URL}/search?query=${encodeURIComponent(query)}`;
+      const searchHtml = await requestText(searchUrl);
+      const queryBonus = index === 0 ? 0 : Math.max(20 - index * 5, 5);
+      const parsed = parseTmdbSearchResults(searchHtml).map((candidate) => ({
         ...candidate,
-        score: scoreTmdbCandidate(candidate, series)
-      }))
-      .sort((left, right) => right.score - left.score);
+        score: scoreTmdbCandidate(candidate, series) + queryBonus
+      }));
+      candidates.push(...parsed);
+    }
+
+    candidates.sort((left, right) => right.score - left.score);
 
     const best = candidates[0];
     if (!best || best.score < 40) {
@@ -290,12 +329,16 @@ async function fetchTmdbArtwork(series) {
 
 async function chooseSourceUrl(series) {
   if (series.ContentType === 'anime') {
-    const artwork = await fetchAnimeArtwork(series);
-    if (artwork?.backdropUrl) {
-      return artwork.backdropUrl;
+    const animeArtwork = await fetchAnimeArtwork(series);
+    if (animeArtwork?.backdropUrl) {
+      return animeArtwork.backdropUrl;
     }
-    if (artwork?.posterUrl) {
-      return artwork.posterUrl;
+    const tmdbArtwork = await fetchTmdbArtwork(series);
+    if (tmdbArtwork?.backdropUrl) {
+      return tmdbArtwork.backdropUrl;
+    }
+    if (animeArtwork?.posterUrl) {
+      return animeArtwork.posterUrl;
     }
   }
 
