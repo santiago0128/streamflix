@@ -16,13 +16,15 @@
   const CAROUSEL_SIZE = 10;
   const CONTINUE_LIMIT = 12;
   const PAGE_SIZE = 24;
-  const HERO_ROTATE_MS = 6500;
+  const HERO_ROTATE_MS = 4000;
+  const CAROUSEL_AUTOPLAY_MS = 4000;
 
   const $ = (id) => document.getElementById(id);
   const toastEl = $('toast');
   let toastTimer = null;
   let heroTimer = null;
   let lastProgressRefreshAt = 0;
+  let carouselAutoplayStops = [];
 
   function toast(msg) {
     toastEl.textContent = msg;
@@ -286,6 +288,8 @@
   function clearCarousels() {
     carouselObservers.forEach((observer) => observer.disconnect());
     carouselObservers = [];
+    carouselAutoplayStops.forEach((stop) => stop());
+    carouselAutoplayStops = [];
   }
 
   function buildCarousel(items, builder = buildCard) {
@@ -320,8 +324,70 @@
     observer.observe(track);
     carouselObservers.push(observer);
     sync();
+    carouselAutoplayStops.push(enableCarouselAutoplay(carousel, track, sync, jump));
 
     return carousel;
+  }
+
+  function enableCarouselAutoplay(carousel, track, sync, jump) {
+    let timer = null;
+    let paused = false;
+
+    const step = () => {
+      if (paused) return;
+      const max = track.scrollWidth - track.clientWidth;
+      if (max <= 1) return;
+
+      const atEnd = track.scrollLeft >= max - 2;
+      const target = atEnd ? 0 : Math.min(track.scrollLeft + jump(), max);
+      track.scrollTo({ left: target, behavior: 'smooth' });
+      sync();
+    };
+
+    const start = () => {
+      stop();
+      if (track.scrollWidth - track.clientWidth <= 1) return;
+      timer = setInterval(step, CAROUSEL_AUTOPLAY_MS);
+    };
+
+    const stop = () => {
+      if (!timer) return;
+      clearInterval(timer);
+      timer = null;
+    };
+
+    const pause = () => {
+      paused = true;
+      stop();
+    };
+
+    const resume = () => {
+      paused = false;
+      start();
+    };
+
+    carousel.addEventListener('mouseenter', pause);
+    carousel.addEventListener('mouseleave', resume);
+    carousel.addEventListener('focusin', pause);
+    carousel.addEventListener('focusout', resume);
+    track.addEventListener('pointerdown', pause);
+    track.addEventListener('pointerup', resume);
+    track.addEventListener('touchstart', pause, { passive: true });
+    track.addEventListener('touchend', resume, { passive: true });
+
+    start();
+
+    return () => {
+      stop();
+      carousel.removeEventListener('mouseenter', pause);
+      carousel.removeEventListener('mouseleave', resume);
+      carousel.removeEventListener('focusin', pause);
+      carousel.removeEventListener('focusout', resume);
+      track.removeEventListener('pointerdown', pause);
+      track.removeEventListener('pointerup', resume);
+      track.removeEventListener('touchstart', pause);
+      track.removeEventListener('touchend', resume);
+    };
   }
 
   function buildCarouselArrow(dir, glyph, label) {
