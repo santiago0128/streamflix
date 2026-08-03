@@ -11,7 +11,8 @@ const MEDIA_DIR = path.join(__dirname, '..', '..', 'media');
 const BACKDROPS_DIR = path.join(MEDIA_DIR, 'backdrops');
 const TARGET_WIDTH = 1920;
 const TARGET_HEIGHT = 1080;
-const TARGET_RATIO = TARGET_WIDTH / TARGET_HEIGHT;
+const ANILIST_API = 'https://graphql.anilist.co';
+const animeArtworkCache = new Map();
 
 function parseArgs(argv) {
   const args = { apply: false, force: false, ids: null };
@@ -44,7 +45,101 @@ function isLocalBackdrop(url) {
   return typeof url === 'string' && url.startsWith('/media/backdrops/');
 }
 
-function chooseSourceUrl(series) {
+function normalizeAnimeSearchTitle(title) {
+  return String(title || '')
+    .replace(/\s*\([^)]*\)\s*$/g, '')
+    .replace(/\b(original|tv|sub español|latino)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function postJson(url, payload) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(payload);
+    const req = https.request(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+          Accept: 'application/json',
+          'User-Agent': 'NoxisBackdropGenerator/1.0'
+        },
+        timeout: 20000
+      },
+      (res) => {
+        let text = '';
+        res.on('data', (chunk) => {
+          text += chunk;
+        });
+        res.on('end', () => {
+          if ((res.statusCode || 0) >= 400) {
+            return reject(new Error(`AniList HTTP ${res.statusCode}`));
+          }
+          try {
+            resolve(JSON.parse(text));
+          } catch {
+            reject(new Error('Respuesta inválida de AniList'));
+          }
+        });
+      }
+    );
+    req.on('timeout', () => req.destroy(new Error('AniList tardó demasiado')));
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+async function fetchAnimeArtwork(series) {
+  const cacheKey = `${series.SourceRef || ''}|${series.Title}`;
+  if (animeArtworkCache.has(cacheKey)) return animeArtworkCache.get(cacheKey);
+
+  const search = normalizeAnimeSearchTitle(series.Title);
+  if (!search) {
+    animeArtworkCache.set(cacheKey, null);
+    return null;
+  }
+
+  try {
+    const response = await postJson(ANILIST_API, {
+      query: `
+        query ($search: String) {
+          Media(search: $search, type: ANIME) {
+            bannerImage
+            coverImage { extraLarge large }
+          }
+        }
+      `,
+      variables: { search }
+    });
+
+    const media = response?.data?.Media || null;
+    const artwork = media
+      ? {
+          backdropUrl: media.bannerImage || media.coverImage?.extraLarge || media.coverImage?.large || null,
+          posterUrl: media.coverImage?.extraLarge || media.coverImage?.large || null
+        }
+      : null;
+    animeArtworkCache.set(cacheKey, artwork);
+    return artwork;
+  } catch {
+    animeArtworkCache.set(cacheKey, null);
+    return null;
+  }
+}
+
+async function chooseSourceUrl(series) {
+  if (series.ContentType === 'anime') {
+    const artwork = await fetchAnimeArtwork(series);
+    if (artwork?.backdropUrl) {
+      return artwork.backdropUrl;
+    }
+    if (artwork?.posterUrl) {
+      return artwork.posterUrl;
+    }
+  }
+
   if (series.BackdropUrl && !isLocalBackdrop(series.BackdropUrl) && series.BackdropUrl !== series.PosterUrl) {
     return series.BackdropUrl;
   }
@@ -118,7 +213,7 @@ async function ensureBackdropFromFile(inputFile, outputFile) {
 }
 
 async function createBackdrop(series) {
-  const sourceUrl = chooseSourceUrl(series);
+  const sourceUrl = await chooseSourceUrl(series);
   if (!sourceUrl) {
     return { ok: false, reason: 'sin imagen origen' };
   }
