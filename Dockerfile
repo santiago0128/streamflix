@@ -11,6 +11,7 @@ RUN npm ci --omit=dev
 
 COPY server ./server
 COPY public ./public
+COPY media ./media
 
 ENV NODE_ENV=production
 EXPOSE 3000
