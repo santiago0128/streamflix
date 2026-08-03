@@ -408,6 +408,37 @@ button { font-family: inherit; cursor: pointer; }
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+.continue-empty {
+  position: relative;
+  overflow: hidden;
+  padding: 26px 24px;
+  border-radius: 20px;
+  border: 1px solid rgba(197,155,255,.14);
+  background: linear-gradient(135deg, rgba(35, 19, 60, .96), rgba(22, 12, 38, .96));
+  box-shadow: 0 18px 44px rgba(7, 3, 22, .25);
+}
+.continue-empty-glow {
+  position: absolute;
+  inset: auto -10% -45px auto;
+  width: 220px;
+  height: 220px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(139,61,255,.34), transparent 68%);
+  pointer-events: none;
+}
+.continue-empty h4 {
+  position: relative;
+  z-index: 1;
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+.continue-empty p {
+  position: relative;
+  z-index: 1;
+  max-width: 620px;
+  color: var(--muted);
+  line-height: 1.6;
+}
 .resume-card {
   background: linear-gradient(180deg, rgba(34,19,59,.95), rgba(27,16,48,.98));
   border: 1px solid rgba(197,155,255,.12);

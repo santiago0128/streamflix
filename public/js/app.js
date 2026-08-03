@@ -438,14 +438,29 @@
     return section;
   }
 
+  function buildContinueEmptyState() {
+    const empty = document.createElement('div');
+    empty.className = 'continue-empty reveal-up';
+    empty.innerHTML = `
+      <div class="continue-empty-glow"></div>
+      <h4>Aún no tienes nada para retomar</h4>
+      <p>Cuando dejes una serie o película a medias, Noxis la mostrará aquí con el capítulo y minuto exacto.</p>
+    `;
+    return empty;
+  }
+
   function renderSections(sections, continueWatching) {
     clearCarousels();
     sectionsEl.innerHTML = '';
 
-    if (continueWatching.length) {
+    if (API.getToken()) {
       const section = buildSectionShell('Seguir viendo', continueWatching.length, '');
       section.classList.add('continue-section');
-      section.appendChild(buildCarousel(continueWatching, buildResumeCard));
+      section.appendChild(
+        continueWatching.length
+          ? buildCarousel(continueWatching, buildResumeCard)
+          : buildContinueEmptyState()
+      );
       sectionsEl.appendChild(section);
     }
 
