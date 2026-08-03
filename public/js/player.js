@@ -49,6 +49,9 @@ const Player = (() => {
   let hls = null;      // instancia de hls.js cuando el episodio es HLS
   let autoSkippedIntro = false;  // para no volver a saltar si el usuario retrocede
   let advancing = false;         // evita encadenar dos cambios de episodio
+  let pendingStartTimeSec = 0;
+  let hooks = {};
+  let lastProgressSentAt = 0;
 
   // Preferencias de reproducción, recordadas entre sesiones.
   const SETTINGS_KEY = 'streamflix_player_settings';
@@ -126,10 +129,13 @@ const Player = (() => {
     } catch { /* daba igual */ }
   }
 
-  function open(list, startIndex, sTitle) {
+  function open(list, startIndex, sTitle, options = {}) {
     playlist = list || [];
     index = startIndex || 0;
     seriesTitle = sTitle || '';
+    pendingStartTimeSec = Number(options.startTimeSec) > 0 ? Number(options.startTimeSec) : 0;
+    hooks = options.hooks || {};
+    lastProgressSentAt = 0;
     buildEpSelect();
     overlay.hidden = false;
     // Antes de cargar: se llama desde el gesto del usuario, y tanto la pantalla
@@ -140,6 +146,8 @@ const Player = (() => {
   }
 
   function close() {
+    persistProgress(true);
+    if (typeof hooks.onClose === 'function') hooks.onClose(getPlaybackSnapshot());
     teardownSource();
     overlay.hidden = true;
     soltarPantalla();
@@ -280,6 +288,7 @@ const Player = (() => {
   function load() {
     const ep = current();
     if (!ep) return;
+    persistProgress(true);
     teardownSource();
 
     titleEl.textContent = `${seriesTitle} — E${ep.EpisodeNumber}: ${ep.Title}`;
@@ -288,6 +297,8 @@ const Player = (() => {
     nextEpBtn.hidden = true;
     btnPrev.disabled = index === 0;
     btnNext.disabled = index === playlist.length - 1;
+    autoSkippedIntro = false;
+    lastProgressSentAt = 0;
 
     const provider = providerOf(ep);
     if (provider === 'embed') {
@@ -323,6 +334,36 @@ const Player = (() => {
     });
   }
 
+  function applyPendingStartTime() {
+    if (!(pendingStartTimeSec > 0) || !isFinite(video.duration) || video.duration <= 0) return;
+    const nextTime = Math.min(Math.max(0, pendingStartTimeSec), Math.max(0, video.duration - 3));
+    pendingStartTimeSec = 0;
+    if (nextTime > 0) video.currentTime = nextTime;
+  }
+
+  function getPlaybackSnapshot() {
+    const ep = current();
+    if (!ep) return null;
+    return {
+      episodeId: ep.Id,
+      episodeNumber: ep.EpisodeNumber,
+      episodeTitle: ep.Title,
+      seriesTitle,
+      positionSec: Math.trunc(video.currentTime || 0),
+      durationSec: Math.trunc(video.duration || ep.DurationSec || 0),
+      playlistIndex: index,
+    };
+  }
+
+  function persistProgress(force = false) {
+    const ep = current();
+    if (!ep || providerOf(ep) === 'embed' || typeof hooks.onProgress !== 'function') return;
+    if (!force && Date.now() - lastProgressSentAt < 8000) return;
+    lastProgressSentAt = Date.now();
+    const snapshot = getPlaybackSnapshot();
+    if (snapshot) hooks.onProgress(snapshot);
+  }
+
   function goTo(i) {
     if (i < 0 || i >= playlist.length) return;
     index = i;
@@ -352,7 +393,10 @@ const Player = (() => {
   }
 
   // ---- Ciclo de reproducción ----
-  video.addEventListener('loadedmetadata', updateIntroMarker);
+  video.addEventListener('loadedmetadata', () => {
+    updateIntroMarker();
+    applyPendingStartTime();
+  });
 
   let ultimoTiempoVisto = -1;
   video.addEventListener('timeupdate', () => {
@@ -390,6 +434,8 @@ const Player = (() => {
     if (inOutro && settings.autoSkipOutro && hasNext()) {
       next();
     }
+
+    persistProgress(false);
   });
 
   video.addEventListener('progress', () => {
@@ -399,9 +445,16 @@ const Player = (() => {
     }
   });
 
-  video.addEventListener('ended', () => { if (settings.autoNext) next(); });
+  video.addEventListener('ended', () => {
+    persistProgress(true);
+    if (settings.autoNext) next();
+  });
   video.addEventListener('play', () => { btnPlay.textContent = '❚❚'; syncPlayIcon(true); });
-  video.addEventListener('pause', () => { btnPlay.textContent = '▶'; syncPlayIcon(false); });
+  video.addEventListener('pause', () => {
+    btnPlay.textContent = '▶';
+    syncPlayIcon(false);
+    persistProgress(true);
+  });
 
   // ---- Señal de carga ----
   // Mientras no haya imagen, algo tiene que moverse en pantalla; si no, en el

@@ -49,5 +49,10 @@ const API = (() => {
     watchlist: () => req('/watchlist'),
     addToList: (seriesId) => req('/watchlist', { method: 'POST', body: { seriesId } }),
     removeFromList: (seriesId) => req('/watchlist/' + seriesId, { method: 'DELETE' }),
+    continueWatching: (limit = 12) => req('/progress/continue-watching?limit=' + encodeURIComponent(limit)),
+    saveProgress: (episodeId, positionSec, durationSec) => req('/progress/' + episodeId, {
+      method: 'PUT',
+      body: { positionSec, durationSec }
+    }),
   };
 })();

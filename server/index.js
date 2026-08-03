@@ -12,6 +12,7 @@ app.use(express.json());
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api', require('./routes/series'));
 app.use('/api/watchlist', require('./routes/watchlist'));
+app.use('/api/progress', require('./routes/progress'));
 
 // Marca de qué versión está corriendo. Permite confirmar desde fuera que un
 // despliegue llegó de verdad, sin tener que entrar al servidor.
@@ -46,4 +47,4 @@ app.use(express.static(publicDir));
 app.get('*', (req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🎬 StreamFlix corriendo en http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`🎬 Noxis corriendo en http://localhost:${PORT}`));
