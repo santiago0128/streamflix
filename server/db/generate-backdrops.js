@@ -32,6 +32,25 @@ const TMDB_TITLE_ALIASES = new Map([
   ['stranger things', ['Stranger Things']],
   ['chernobyl', ['Chernobyl']]
 ]);
+const BACKDROP_OVERRIDES = new Map([
+  ['el padrino', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/tSPT36ZKlP2WVHJLM4cQPLSzv3b.jpg'],
+  ['el padrino 2', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/kGzFbGhp99zva6oZODW5atUtnqi.jpg'],
+  ['el padrino 3', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/zNnjHLDtV8Ti3aworltaeaLMov4.jpg'],
+  ['matrix', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/tlm8UkiQsitc8rSuIAscQDCnP8d.jpg'],
+  ['gladiador', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/jhk6D8pim3yaByu1801kMoxXFaX.jpg'],
+  ['el rey leon', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/q00H8EqULYSK74lgevMkhmGGLHn.jpg'],
+  ['el gran showman', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/lrNKm3HNvGdZoAfiBKu7b04FLHN.jpg'],
+  ['stranger things', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/56v2KjBlU4XaOv9rVYEQypROD7P.jpg'],
+  ['the last of us', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/acevLdSl5I2MK5RYAm7gwAndt1w.jpg'],
+  ['la casa del dragon', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/577eXC8wFQT0eUrJcgznSiFPRmk.jpg'],
+  ['parque jurasico', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/o7LzVmlOSYc3EspyVMC9bsTTARc.jpg'],
+  ['el increible hulk', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/jPu8yiadqgzwFPGKJmGo637ASVP.jpg'],
+  ['spider-man', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/zQ8AxTPiCiS5nnwXpwTBPBHSaa5.jpg'],
+  ['spider-man homecoming', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/fn4n6uOYcB6Uh89nbNPoU2w80RV.jpg'],
+  ['spider-man no way home', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/14QbnygCuTO0vl7CAFmPf1fgZfV.jpg'],
+  ['the office', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/mLyW3UTgi2lsMdtueYODcfAB9Ku.jpg'],
+  ['rick and morty', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/i4PpW1XyRlBuSNSIBRIIwSjEpjl.jpg']
+]);
 
 function parseArgs(argv) {
   const args = { apply: false, force: false, ids: null };
@@ -328,6 +347,11 @@ async function fetchTmdbArtwork(series) {
 }
 
 async function chooseSourceUrl(series) {
+  const overrideUrl = BACKDROP_OVERRIDES.get(normalizeSearchTitle(series.Title));
+  if (overrideUrl) {
+    return overrideUrl;
+  }
+
   if (series.ContentType === 'anime') {
     const animeArtwork = await fetchAnimeArtwork(series);
     if (animeArtwork?.backdropUrl) {
