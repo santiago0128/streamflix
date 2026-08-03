@@ -46,6 +46,7 @@
       </div>
     </div>
   </header>
+  <button class="mobile-menu-backdrop" id="mobileMenuBackdrop" type="button" aria-label="Cerrar menú lateral" hidden></button>
 
   <!-- ===================== HERO ===================== -->
   <section class="hero" id="hero" hidden>
@@ -261,6 +262,7 @@
       var menu = document.getElementById('btnMenuToggle');
       var lupa = document.getElementById('btnSearchToggle');
       var panel = document.querySelector('.nav-right');
+      var fondo = document.getElementById('mobileMenuBackdrop');
       var buscador = document.getElementById('searchInput');
       var secciones = document.querySelector('.nav-links');
 
@@ -283,29 +285,30 @@
         cuerpo.classList.toggle('menu-open', estado);
         if (menu) menu.setAttribute('aria-expanded', String(estado));
         if (lupa) lupa.setAttribute('aria-expanded', String(estado));
+        if (fondo) fondo.hidden = !estado;
         if (estado && enfocarBusqueda && buscador) setTimeout(function () { buscador.focus(); }, 220);
       }
 
       colocarSecciones();
       if (estrecho.addEventListener) estrecho.addEventListener('change', colocarSecciones);
 
-      if (menu) menu.addEventListener('click', function () { abrir(!cuerpo.classList.contains('menu-open'), false); });
-      if (lupa) lupa.addEventListener('click', function () { abrir(true, true); });
+      if (menu) menu.addEventListener('click', function (evento) {
+        evento.stopPropagation();
+        abrir(!cuerpo.classList.contains('menu-open'), false);
+      });
+      if (lupa) lupa.addEventListener('click', function (evento) {
+        evento.stopPropagation();
+        abrir(true, true);
+      });
 
       // Al elegir seccion el panel sobra: estorba justo lo que acabas de pedir.
       if (panel) {
         panel.addEventListener('click', function (evento) {
+          evento.stopPropagation();
           if (evento.target.closest('a, #loginBtn, #logoutBtn')) abrir(false, false);
         });
       }
-
-      // Tocar fuera cierra. El fondo es un pseudoelemento del body, asi que se
-      // detecta por donde cae el toque y no por el elemento.
-      document.addEventListener('click', function (evento) {
-        if (!cuerpo.classList.contains('menu-open')) return;
-        if (evento.target.closest('.nav-right, .nav-icons')) return;
-        abrir(false, false);
-      });
+      if (fondo) fondo.addEventListener('click', function () { abrir(false, false); });
 
       document.addEventListener('keydown', function (evento) {
         if (evento.key === 'Escape') abrir(false, false);

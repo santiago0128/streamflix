@@ -648,6 +648,14 @@ button { font-family: inherit; cursor: pointer; }
    sesión en el mismo renglón. Ahora arriba solo quedan dos iconos y todo eso
    se recoge en un panel que se desliza. */
 .nav-icons { display: none; gap: 4px; }
+.mobile-menu-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  border: none;
+  background: rgba(0,0,0,.6);
+  z-index: 69;
+}
 .nav-icon {
   width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
   background: transparent; border: none; color: var(--text); cursor: pointer; border-radius: 8px;
@@ -690,14 +698,19 @@ button { font-family: inherit; cursor: pointer; }
     transform: none;
     transition: transform .22s ease;
   }
+  /* La barra superior crea un stacking context propio por su z-index. Cuando
+     el overlay vive en body, si la navbar se queda en z=40 el fondo oscuro
+     puede tapar al panel aunque este tenga z=70 dentro de la propia barra.
+     Al elevar la navbar solo mientras el menu esta abierto, el drawer queda
+     por encima del overlay y vuelve a ser interactivo en movil. */
+  body.menu-open .navbar { z-index: 71; }
   @starting-style {
     body.menu-open .nav-right { transform: translateX(100%); }
   }
 
-  /* Fondo oscuro detrás del panel. */
-  body.menu-open::before {
-    content: ''; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 69;
-  }
+  /* Fondo oscuro detrás del panel como elemento real para que el cierre por
+     toque no dependa de clicks globales, que en móvil eran frágiles. */
+  body.menu-open .mobile-menu-backdrop { display: block; }
 
   /* Dentro del panel las secciones vuelven, en vertical y con sitio para el dedo. */
   /* Ya dentro del panel: en vertical y con sitio para el dedo. */
