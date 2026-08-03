@@ -12,7 +12,9 @@ const BACKDROPS_DIR = path.join(MEDIA_DIR, 'backdrops');
 const TARGET_WIDTH = 1920;
 const TARGET_HEIGHT = 1080;
 const ANILIST_API = 'https://graphql.anilist.co';
+const TMDB_BASE_URL = 'https://www.themoviedb.org';
 const animeArtworkCache = new Map();
+const tmdbArtworkCache = new Map();
 
 function parseArgs(argv) {
   const args = { apply: false, force: false, ids: null };
@@ -51,6 +53,17 @@ function normalizeAnimeSearchTitle(title) {
     .replace(/\b(original|tv|sub español|latino)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeSearchTitle(title) {
+  return String(title || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\b(original|tv|sub espanol|sub español|latino)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
 function postJson(url, payload) {
@@ -129,6 +142,152 @@ async function fetchAnimeArtwork(series) {
   }
 }
 
+function requestText(url, redirects = 5) {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https:') ? https : http;
+    const req = client.get(
+      url,
+      {
+        headers: {
+          'User-Agent': 'NoxisBackdropGenerator/1.0',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        },
+        timeout: 20000
+      },
+      (res) => {
+        const status = res.statusCode || 0;
+        const location = res.headers.location;
+        if (status >= 300 && status < 400 && location && redirects > 0) {
+          res.resume();
+          return resolve(requestText(new URL(location, url).toString(), redirects - 1));
+        }
+        if (status >= 400) {
+          res.resume();
+          return reject(new Error(`HTTP ${status}`));
+        }
+
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          text += chunk;
+        });
+        res.on('end', () => resolve(text));
+      }
+    );
+
+    req.on('timeout', () => req.destroy(new Error('Tiempo de espera agotado')));
+    req.on('error', reject);
+  });
+}
+
+function decodeHtml(value) {
+  return String(value || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function parseReleaseYear(value) {
+  const match = String(value || '').match(/\b(19|20)\d{2}\b/);
+  return match ? Number(match[0]) : null;
+}
+
+function scoreTmdbCandidate(candidate, series) {
+  const normalizedSeriesTitle = normalizeSearchTitle(series.Title);
+  const normalizedCandidateTitle = normalizeSearchTitle(candidate.title);
+  let score = 0;
+
+  if (candidate.mediaType === 'tv' && series.ContentType === 'series') score += 40;
+  if (candidate.mediaType === 'movie' && series.ContentType === 'movie') score += 40;
+  if (normalizedCandidateTitle === normalizedSeriesTitle) score += 50;
+  if (normalizedCandidateTitle.includes(normalizedSeriesTitle) || normalizedSeriesTitle.includes(normalizedCandidateTitle)) score += 25;
+
+  if (series.ReleaseYear && candidate.year) {
+    const delta = Math.abs(series.ReleaseYear - candidate.year);
+    if (delta === 0) score += 25;
+    else if (delta === 1) score += 15;
+    else if (delta <= 3) score += 5;
+    else score -= Math.min(delta, 20);
+  }
+
+  return score;
+}
+
+function parseTmdbSearchResults(html) {
+  const candidates = [];
+  const pattern = /data-media-type="(tv|movie)"[\s\S]*?href="\/(tv|movie)\/([^"]+)"[\s\S]*?<h2[^>]*><span>([^<]+)<\/span><\/h2>[\s\S]*?<span class="release_date w-full font-light">([^<]*)<\/span>/g;
+  let match;
+  while ((match = pattern.exec(html))) {
+    const mediaType = match[1];
+    const hrefType = match[2];
+    if (mediaType !== hrefType) continue;
+    candidates.push({
+      mediaType,
+      path: `/${hrefType}/${match[3]}`,
+      title: decodeHtml(match[4]),
+      year: parseReleaseYear(match[5])
+    });
+  }
+  return candidates;
+}
+
+function extractTmdbBackdropUrl(html) {
+  const backdropImg = html.match(/<img class="backdrop w-full"[^>]+srcset="([^"]+)"/i);
+  if (backdropImg?.[1]) {
+    const entries = backdropImg[1]
+      .split(',')
+      .map((part) => part.trim().split(/\s+/)[0])
+      .filter(Boolean);
+    if (entries.length) return entries[entries.length - 1];
+  }
+
+  const ogImages = [...html.matchAll(/<meta property="og:image" content="([^"]+)"/gi)]
+    .map((match) => match[1])
+    .filter((value) => /\/t\/p\/w(780|1280|1920|original)\//.test(value));
+  if (ogImages.length > 1) return ogImages[1];
+  if (ogImages.length) return ogImages[0];
+  return null;
+}
+
+async function fetchTmdbArtwork(series) {
+  const cacheKey = `${series.ContentType}|${series.Title}|${series.ReleaseYear || ''}`;
+  if (tmdbArtworkCache.has(cacheKey)) return tmdbArtworkCache.get(cacheKey);
+
+  const searchTitle = normalizeSearchTitle(series.Title);
+  if (!searchTitle) {
+    tmdbArtworkCache.set(cacheKey, null);
+    return null;
+  }
+
+  try {
+    const searchUrl = `${TMDB_BASE_URL}/search?query=${encodeURIComponent(series.Title)}`;
+    const searchHtml = await requestText(searchUrl);
+    const candidates = parseTmdbSearchResults(searchHtml)
+      .map((candidate) => ({
+        ...candidate,
+        score: scoreTmdbCandidate(candidate, series)
+      }))
+      .sort((left, right) => right.score - left.score);
+
+    const best = candidates[0];
+    if (!best || best.score < 40) {
+      tmdbArtworkCache.set(cacheKey, null);
+      return null;
+    }
+
+    const detailHtml = await requestText(`${TMDB_BASE_URL}${best.path}`);
+    const backdropUrl = extractTmdbBackdropUrl(detailHtml);
+    const artwork = backdropUrl ? { backdropUrl } : null;
+    tmdbArtworkCache.set(cacheKey, artwork);
+    return artwork;
+  } catch {
+    tmdbArtworkCache.set(cacheKey, null);
+    return null;
+  }
+}
+
 async function chooseSourceUrl(series) {
   if (series.ContentType === 'anime') {
     const artwork = await fetchAnimeArtwork(series);
@@ -137,6 +296,13 @@ async function chooseSourceUrl(series) {
     }
     if (artwork?.posterUrl) {
       return artwork.posterUrl;
+    }
+  }
+
+  if (series.ContentType === 'series' || series.ContentType === 'movie') {
+    const artwork = await fetchTmdbArtwork(series);
+    if (artwork?.backdropUrl) {
+      return artwork.backdropUrl;
     }
   }
 
@@ -246,7 +412,7 @@ async function main() {
       : '';
 
     const result = await pool.request().query(`
-      SELECT Id, Title, ContentType, PosterUrl, BackdropUrl
+      SELECT Id, Title, ContentType, ReleaseYear, PosterUrl, BackdropUrl
       FROM dbo.Series
       ${idsFilter}
       ORDER BY Id
