@@ -766,12 +766,12 @@ async function findEpisodeSnapshot(pool, episode) {
   const sources = [
     {
       table: 'dbo.JkAnimeEpisodeSnapshots',
-      prefix: 'jkanime:',
+      prefixes: ['jkanime:'],
       matchSeason: false
     },
     {
       table: 'dbo.PelisPlusSnapshots',
-      prefix: 'pelisplushd:',
+      prefixes: ['pelisplushd:', 'pelisflix200:', 'pelismart:', 'pelisplus:', 'cuevana3:'],
       matchSeason: true
     }
   ];
@@ -779,11 +779,14 @@ async function findEpisodeSnapshot(pool, episode) {
   const sourceRef = String(episode.SourceRef || '');
 
   for (const source of sources) {
-    if (!sourceRef.toLowerCase().startsWith(source.prefix)) continue;
+    const matchedPrefix = (source.prefixes || []).find((prefix) =>
+      sourceRef.toLowerCase().startsWith(prefix)
+    );
+    if (!matchedPrefix) continue;
 
     try {
       const result = await pool.request()
-        .input('slug', sql.NVarChar(255), sourceRef.slice(source.prefix.length))
+        .input('slug', sql.NVarChar(255), sourceRef.slice(matchedPrefix.length))
         .input('episodeNumber', sql.Int, episode.EpisodeNumber)
         .input('seasonNumber', sql.Int, episode.SeasonNumber)
         .query(`
