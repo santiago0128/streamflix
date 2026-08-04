@@ -52,6 +52,7 @@ const Player = (() => {
   let pendingStartTimeSec = 0;
   let hooks = {};
   let lastProgressSentAt = 0;
+  let loadSequence = 0;
 
   // Preferencias de reproducción, recordadas entre sesiones.
   const SETTINGS_KEY = 'streamflix_player_settings';
@@ -67,6 +68,7 @@ const Player = (() => {
   const OUTRO_FALLBACK_SEC = 40;
 
   const providerOf = (ep) => String(ep && ep.Provider || 'file').toLowerCase();
+  const activeProviderOf = (ep) => String(ep && (ep.__activeProvider || ep.Provider) || 'file').toLowerCase();
   const hasNext = () => index < playlist.length - 1;
 
   function durationOf(ep) {
@@ -285,9 +287,10 @@ const Player = (() => {
     });
   }
 
-  function load() {
+  async function load() {
     const ep = current();
     if (!ep) return;
+    const currentLoad = ++loadSequence;
     persistProgress(true);
     teardownSource();
 
@@ -299,24 +302,44 @@ const Player = (() => {
     btnNext.disabled = index === playlist.length - 1;
     autoSkippedIntro = false;
     lastProgressSentAt = 0;
+    ep.__activeProvider = providerOf(ep);
 
-    const provider = providerOf(ep);
+    ocultarError();
+    setEmbedMode(false);
+    playerSpinner.hidden = false;
+
+    let playback = null;
+    try {
+      playback = await API.episodePlayback(ep.Id);
+    } catch (error) {
+      if (currentLoad !== loadSequence) return;
+      mostrarError(
+        'No se pudo resolver la reproducción',
+        error.message || 'No fue posible obtener una fuente de video válida para este episodio.'
+      );
+      return;
+    }
+
+    if (currentLoad !== loadSequence) return;
+
+    const provider = String(playback?.provider || providerOf(ep)).toLowerCase();
+    const playbackUrl = playback?.url || ep.VideoUrl;
+    ep.__activeProvider = provider;
+
     if (provider === 'embed') {
       setEmbedMode(true);
-      videoEmbed.src = ep.VideoUrl;
+      videoEmbed.src = playbackUrl;
       return; // sin control de reproducción: no hay marcadores ni auto-avance
     }
 
     setEmbedMode(false);
-    ocultarError();
-    playerSpinner.hidden = false;  // hasta que llegue el primer fotograma
     if (provider === 'hls') {
       // Con HLS hay que esperar: loadSource/attachMedia son asíncronos y un
       // play() inmediato se rechaza sin que se note, dejando el video parado
       // hasta que el usuario lo arranca a mano.
-      loadHls(ep.VideoUrl, startPlayback);
+      loadHls(playbackUrl, startPlayback);
     } else {
-      video.src = ep.VideoUrl;
+      video.src = playbackUrl;
       startPlayback();
     }
     updateIntroMarker();
@@ -357,7 +380,7 @@ const Player = (() => {
 
   function persistProgress(force = false) {
     const ep = current();
-    if (!ep || providerOf(ep) === 'embed' || typeof hooks.onProgress !== 'function') return;
+    if (!ep || activeProviderOf(ep) === 'embed' || typeof hooks.onProgress !== 'function') return;
     if (!force && Date.now() - lastProgressSentAt < 8000) return;
     lastProgressSentAt = Date.now();
     const snapshot = getPlaybackSnapshot();
@@ -476,7 +499,7 @@ const Player = (() => {
   // Los episodios que no son HLS (Provider 'file') no pasan por hls.js, así que
   // su fallo llega por aquí y hay que contarlo igual.
   video.addEventListener('error', () => {
-    if (providerOf(current()) === 'hls') return;  // de eso ya se encarga hls.js
+    if (activeProviderOf(current()) === 'hls') return;  // de eso ya se encarga hls.js
     mostrarError('No se pudo reproducir este capítulo',
       'El origen del vídeo no respondió. Si se importó hace tiempo, es probable que el enlace haya caducado.');
   });

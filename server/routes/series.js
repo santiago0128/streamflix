@@ -154,6 +154,22 @@ function buildPlaybackUrl(req, episodeId) {
   return `/api/episodes/${episodeId}/stream`;
 }
 
+function looksLikeDirectVideoUrl(url) {
+  return /\.(m3u8|mp4|webm|mov)(?:$|\?)/i.test(String(url || ''));
+}
+
+function inferProviderFromVideo(url, contentType, fallback = 'file') {
+  if (/mpegurl/i.test(contentType || '') || /\.m3u8(?:$|\?)/i.test(String(url || ''))) {
+    return 'hls';
+  }
+
+  if (/^video\//i.test(contentType || '') || /\.(mp4|webm|mov)(?:$|\?)/i.test(String(url || ''))) {
+    return 'file';
+  }
+
+  return fallback;
+}
+
 function requestUpstream(url, headers = {}, redirectCount = 0) {
   if (redirectCount > 8) {
     return Promise.reject(new Error(`Demasiadas redirecciones para ${url}`));
@@ -429,11 +445,87 @@ async function fetchPlayerMediaUrls(embedUrl, pageUrl) {
   return [];
 }
 
+function parsePlayerOptions(snapshot) {
+  if (!snapshot?.PlayerOptionsJson) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(snapshot.PlayerOptionsJson);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function collectEmbedCandidates(snapshot, episode) {
+  const urls = [
+    snapshot?.VideoSrcReferer,
+    snapshot?.VerifiedVideoReferer,
+    snapshot?.PrimaryVideoUrl,
+    episode?.VideoUrl
+  ];
+
+  for (const option of parsePlayerOptions(snapshot)) {
+    urls.push(option?.embedUrl, option?.url, option?.playerUrl);
+  }
+
+  const seen = new Set();
+  return urls
+    .map((url) => normalizeUrl(url))
+    .filter((url) => {
+      if (!url || looksLikeDirectVideoUrl(url) || seen.has(url)) return false;
+      seen.add(url);
+      return /^https?:/i.test(url);
+    });
+}
+
+function collectDirectVideoCandidates(snapshot, episode) {
+  const candidates = [
+    { url: snapshot?.VideoSrcUrl, referer: snapshot?.VideoSrcReferer },
+    { url: snapshot?.VerifiedVideoUrl, referer: snapshot?.VerifiedVideoReferer },
+    { url: snapshot?.PrimaryVideoUrl, referer: snapshot?.VerifiedVideoReferer || snapshot?.VideoSrcReferer },
+    { url: episode?.VideoUrl, referer: null }
+  ];
+
+  const seen = new Set();
+  return candidates
+    .map((candidate) => ({
+      url: normalizeUrl(candidate.url),
+      referer: normalizeUrl(candidate.referer)
+    }))
+    .filter((candidate) => {
+      if (!candidate.url || candidate.url === 'NO_VIDEO_FOUND') return false;
+      if (!looksLikeDirectVideoUrl(candidate.url)) return false;
+      const key = `${candidate.url}|${candidate.referer || ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+async function resolveDirectVideoCandidate(snapshot, episode) {
+  for (const candidate of collectDirectVideoCandidates(snapshot, episode)) {
+    const verified = await probeVideoUrl(
+      candidate.url,
+      candidate.referer ? { Referer: candidate.referer } : {}
+    );
+
+    if (verified) {
+      return {
+        url: verified.url,
+        referer: candidate.referer,
+        contentType: verified.contentType,
+        provider: inferProviderFromVideo(verified.url, verified.contentType)
+      };
+    }
+  }
+
+  return null;
+}
+
 async function refreshVideoSourceFromSnapshot(snapshot) {
-  const embedCandidates = [snapshot?.VideoSrcReferer, snapshot?.VerifiedVideoReferer]
-    .filter(Boolean)
-    .filter((url, index, arr) => arr.indexOf(url) === index)
-    .filter((url) => !/\.(m3u8|mp4|webm|mov)(?:$|\?)/i.test(url));
+  const embedCandidates = collectEmbedCandidates(snapshot, null);
 
   for (const embedUrl of embedCandidates) {
     try {
@@ -444,7 +536,8 @@ async function refreshVideoSourceFromSnapshot(snapshot) {
           return {
             url: verified.url,
             referer: embedUrl,
-            contentType: verified.contentType
+            contentType: verified.contentType,
+            provider: inferProviderFromVideo(verified.url, verified.contentType)
           };
         }
       }
@@ -454,6 +547,69 @@ async function refreshVideoSourceFromSnapshot(snapshot) {
   }
 
   return null;
+}
+
+function fallbackEmbedUrl(snapshot, episode) {
+  return collectEmbedCandidates(snapshot, episode)[0] || null;
+}
+
+async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = undefined) {
+  const snapshot = providedSnapshot === undefined ? await findEpisodeSnapshot(pool, episode) : providedSnapshot;
+  const direct = await resolveDirectVideoCandidate(snapshot, episode);
+
+  if (direct) {
+    return {
+      provider: direct.provider,
+      url: buildPlaybackUrl(req, episode.Id),
+      proxied: true,
+      sourceUrl: direct.url,
+      referer: direct.referer,
+      contentType: direct.contentType,
+      refreshed: false,
+      canTrackProgress: true
+    };
+  }
+
+  if (snapshot) {
+    const refreshed = await refreshVideoSourceFromSnapshot(snapshot);
+    if (refreshed) {
+      return {
+        provider: refreshed.provider || 'file',
+        url: buildPlaybackUrl(req, episode.Id),
+        proxied: true,
+        sourceUrl: refreshed.url,
+        referer: refreshed.referer,
+        contentType: refreshed.contentType,
+        refreshed: true,
+        canTrackProgress: true
+      };
+    }
+  }
+
+  const fallbackUrl = fallbackEmbedUrl(snapshot, episode);
+  if (fallbackUrl) {
+    return {
+      provider: 'embed',
+      url: fallbackUrl,
+      proxied: false,
+      sourceUrl: fallbackUrl,
+      referer: null,
+      contentType: null,
+      refreshed: false,
+      canTrackProgress: false
+    };
+  }
+
+  return {
+    provider: inferProviderFromVideo(episode?.VideoUrl, null, String(episode?.Provider || 'file').toLowerCase()),
+    url: String(episode?.VideoUrl || ''),
+    proxied: false,
+    sourceUrl: String(episode?.VideoUrl || ''),
+    referer: null,
+    contentType: null,
+    refreshed: false,
+    canTrackProgress: String(episode?.Provider || 'file').toLowerCase() !== 'embed'
+  };
 }
 
 // GET /api/genres  -> lista de géneros para el filtro
@@ -631,7 +787,15 @@ async function findEpisodeSnapshot(pool, episode) {
         .input('episodeNumber', sql.Int, episode.EpisodeNumber)
         .input('seasonNumber', sql.Int, episode.SeasonNumber)
         .query(`
-          SELECT TOP 1 EpisodePageUrl, VideoSrcUrl, VideoSrcReferer, VerifiedVideoUrl, VerifiedVideoReferer
+          SELECT TOP 1
+            EpisodePageUrl,
+            VideoSrcUrl,
+            VideoSrcReferer,
+            VerifiedVideoUrl,
+            VerifiedVideoReferer,
+            PrimaryVideoUrl,
+            PrimaryVideoSource,
+            PlayerOptionsJson
             FROM ${source.table}
            WHERE SeriesSlug = @slug
              AND EpisodeNumber = @episodeNumber
@@ -648,6 +812,45 @@ async function findEpisodeSnapshot(pool, episode) {
 
   return null;
 }
+
+router.get('/episodes/:id/playback', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Id inválido' });
+
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input('id', sql.Int, id)
+      .query(`
+        SELECT TOP 1
+          e.Id,
+          e.VideoUrl,
+          e.Provider,
+          e.EpisodeNumber,
+          se.SeasonNumber,
+          sr.SourceRef
+        FROM dbo.Episodes e
+        JOIN dbo.Seasons se ON se.Id = e.SeasonId
+        JOIN dbo.Series sr ON sr.Id = se.SeriesId
+        WHERE e.Id = @id
+      `);
+
+    const episode = result.recordset[0];
+    if (!episode) {
+      return res.status(404).json({ error: 'Episodio no encontrado' });
+    }
+
+    const playback = await resolveEpisodePlayback(req, pool, episode);
+    if (!playback?.url) {
+      return res.status(404).json({ error: 'No se encontró una fuente de reproducción válida' });
+    }
+
+    res.json(playback);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al resolver la reproducción del episodio' });
+  }
+});
 
 // GET /api/episodes/:id/stream  -> proxy de reproducción para archivos remotos
 router.get('/episodes/:id/stream', async (req, res) => {
@@ -677,18 +880,15 @@ router.get('/episodes/:id/stream', async (req, res) => {
       return res.status(404).json({ error: 'Episodio no encontrado' });
     }
 
-    const provider = String(episode.Provider || 'file').toLowerCase();
-    if (provider === 'embed') {
-      return res.status(400).json({ error: 'Este episodio usa un embed externo' });
-    }
-
     const snapshot = await findEpisodeSnapshot(pool, episode);
+    const direct = await resolveDirectVideoCandidate(snapshot, episode);
+    const refreshed = direct ? null : await refreshVideoSourceFromSnapshot(snapshot);
 
     const candidates = [
-      { url: snapshot?.VideoSrcUrl, referer: snapshot?.VideoSrcReferer },
-      { url: snapshot?.VerifiedVideoUrl, referer: snapshot?.VerifiedVideoReferer },
-      { url: episode.VideoUrl, referer: null }
-    ].filter((item) => item.url && item.url !== 'NO_VIDEO_FOUND');
+      direct && { url: direct.url, referer: direct.referer },
+      refreshed && { url: refreshed.url, referer: refreshed.referer },
+      ...collectDirectVideoCandidates(snapshot, episode)
+    ].filter(Boolean);
 
     if (!candidates.length) {
       return res.status(404).json({ error: 'No se encontró una fuente de video reproducible' });
