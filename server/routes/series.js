@@ -600,15 +600,35 @@ async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = und
     };
   }
 
+  const fallbackProvider = inferProviderFromVideo(
+    episode?.VideoUrl,
+    null,
+    String(episode?.Provider || 'file').toLowerCase()
+  );
+  const fallbackDirectUrl = String(episode?.VideoUrl || '');
+
+  if (fallbackDirectUrl && fallbackProvider !== 'embed') {
+    return {
+      provider: fallbackProvider,
+      url: buildPlaybackUrl(req, episode.Id),
+      proxied: true,
+      sourceUrl: fallbackDirectUrl,
+      referer: null,
+      contentType: null,
+      refreshed: false,
+      canTrackProgress: true
+    };
+  }
+
   return {
-    provider: inferProviderFromVideo(episode?.VideoUrl, null, String(episode?.Provider || 'file').toLowerCase()),
-    url: String(episode?.VideoUrl || ''),
+    provider: fallbackProvider,
+    url: fallbackDirectUrl,
     proxied: false,
-    sourceUrl: String(episode?.VideoUrl || ''),
+    sourceUrl: fallbackDirectUrl,
     referer: null,
     contentType: null,
     refreshed: false,
-    canTrackProgress: String(episode?.Provider || 'file').toLowerCase() !== 'embed'
+    canTrackProgress: fallbackProvider !== 'embed'
   };
 }
 
