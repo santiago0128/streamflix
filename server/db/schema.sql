@@ -39,7 +39,7 @@ IF COL_LENGTH('dbo.Series', 'SourceRef') IS NULL
     ALTER TABLE dbo.Series ADD SourceRef NVARCHAR(100) NULL;
 
 -- Tipo de contenido principal:
---   'anime'  = anime / animación japonesa importada
+--   'anime'  = solo títulos importados desde páginas de anime (JKAnime)
 --   'series' = serie convencional
 --   'movie'  = película (se modela con una temporada/episodio técnico para
 --              reutilizar el reproductor actual sin duplicar lógica)
@@ -66,22 +66,25 @@ UPDATE s
        WHEN s.SourceRef LIKE ''jkanime:%'' THEN ''anime''
        WHEN EXISTS (
            SELECT 1
-             FROM dbo.SeriesGenres sg
-             JOIN dbo.Genres g ON g.Id = sg.GenreId
-            WHERE sg.SeriesId = s.Id
-              AND g.Name IN (N''Anime'', N''Animación'')
-       ) THEN ''anime''
+             FROM dbo.Seasons se
+             JOIN dbo.Episodes e ON e.SeasonId = se.Id
+            WHERE se.SeriesId = s.Id
+           GROUP BY se.SeriesId
+           HAVING COUNT(*) = 1 AND COUNT(DISTINCT se.Id) = 1
+       ) THEN ''movie''
        WHEN s.ContentType IS NULL OR s.ContentType = '''' THEN ''series''
+       WHEN s.ContentType = ''anime'' THEN ''series''
        ELSE s.ContentType
    END
   FROM dbo.Series s
  WHERE s.SourceRef LIKE ''jkanime:%''
     OR EXISTS (
            SELECT 1
-             FROM dbo.SeriesGenres sg
-             JOIN dbo.Genres g ON g.Id = sg.GenreId
-            WHERE sg.SeriesId = s.Id
-              AND g.Name IN (N''Anime'', N''Animación'')
+             FROM dbo.Seasons se
+             JOIN dbo.Episodes e ON e.SeasonId = se.Id
+            WHERE se.SeriesId = s.Id
+           GROUP BY se.SeriesId
+           HAVING COUNT(*) = 1 AND COUNT(DISTINCT se.Id) = 1
        )
     OR s.ContentType IS NULL
     OR s.ContentType = ''''
