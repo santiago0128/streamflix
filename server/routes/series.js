@@ -141,6 +141,15 @@ function normalizeUrl(url, baseUrl) {
   }
 }
 
+function decodeBase64ToBuffer(value) {
+  return Buffer.from(String(value || ''), 'base64');
+}
+
+function matchOne(text, pattern) {
+  const match = pattern.exec(text || '');
+  return match ? String(match[1] || '').trim() : null;
+}
+
 function isRedirectStatus(statusCode) {
   return [301, 302, 303, 307, 308].includes(statusCode);
 }
@@ -433,11 +442,75 @@ function extractPlayerMediaUrls(html, pageUrl) {
     });
 }
 
+function extractEmbed69Links(html, pageUrl) {
+  const dataLinkJson = matchOne(html, /let\s+dataLink\s*=\s*(\[[\s\S]*?\]);/i);
+  const challenge = matchOne(html, /const\s+POW_CHALLENGE\s*=\s*'([^']+)'/i);
+  const difficulty = Number(matchOne(html, /const\s+POW_DIFFICULTY\s*=\s*(\d+)/i) || 0);
+  const salt = matchOne(html, /const\s+POW_SALT\s*=\s*'([^']+)'/i);
+
+  if (!dataLinkJson || !challenge || !difficulty || !salt) {
+    return [];
+  }
+
+  let dataLink;
+  try {
+    dataLink = JSON.parse(dataLinkJson);
+  } catch {
+    return [];
+  }
+
+  const prefix = '0'.repeat(difficulty);
+  let nonce = 0;
+  while (nonce < 2_000_000) {
+    const hash = crypto.createHash('sha256').update(challenge + nonce).digest('hex');
+    if (hash.startsWith(prefix)) {
+      break;
+    }
+    nonce += 1;
+  }
+
+  if (nonce >= 2_000_000) {
+    return [];
+  }
+
+  const aesKey = crypto.createHash('sha256').update(challenge + nonce + salt).digest().subarray(0, 32);
+  const urls = [];
+  const seen = new Set();
+
+  const decrypt = (encryptedBase64) => {
+    try {
+      const raw = decodeBase64ToBuffer(encryptedBase64);
+      const iv = raw.subarray(0, 16);
+      const ciphertext = raw.subarray(16);
+      const decipher = crypto.createDecipheriv('aes-256-cbc', aesKey, iv);
+      const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8').trim();
+      return normalizeUrl(plaintext, pageUrl);
+    } catch {
+      return null;
+    }
+  };
+
+  for (const file of Array.isArray(dataLink) ? dataLink : []) {
+    for (const group of [file?.sortedEmbeds, file?.downloadEmbeds]) {
+      for (const entry of Array.isArray(group) ? group : []) {
+        const decrypted = decrypt(entry?.link);
+        if (!decrypted || seen.has(decrypted)) continue;
+        seen.add(decrypted);
+        urls.push(decrypted);
+      }
+    }
+  }
+
+  return urls;
+}
+
 async function fetchPlayerMediaUrls(embedUrl, pageUrl) {
   const attempts = [{ Accept: 'text/html,application/xhtml+xml', Referer: pageUrl }, { Accept: 'text/html,application/xhtml+xml' }];
 
   for (const headers of attempts) {
     const response = await requestText(embedUrl, headers);
+    const embed69Links = extractEmbed69Links(response.body, embedUrl);
+    if (embed69Links.length) return embed69Links;
     const urls = extractPlayerMediaUrls(response.body, embedUrl);
     if (urls.length) return urls;
   }
@@ -529,20 +602,41 @@ async function refreshVideoSourceFromSnapshot(snapshot) {
 
   for (const embedUrl of embedCandidates) {
     try {
-      const mediaUrls = await fetchPlayerMediaUrls(embedUrl, snapshot?.EpisodePageUrl || embedUrl);
-      for (const mediaUrl of mediaUrls) {
-        const verified = await probeVideoUrl(mediaUrl, { Referer: embedUrl });
-        if (verified) {
-          return {
-            url: verified.url,
-            referer: embedUrl,
-            contentType: verified.contentType,
-            provider: inferProviderFromVideo(verified.url, verified.contentType)
-          };
-        }
-      }
+      const resolved = await resolvePlayableUrl(embedUrl, snapshot?.EpisodePageUrl || embedUrl);
+      if (resolved) return resolved;
     } catch {
       continue;
+    }
+  }
+
+  return null;
+}
+
+async function resolvePlayableUrl(candidateUrl, referer, seen = new Set(), depth = 0) {
+  const normalizedCandidate = normalizeUrl(candidateUrl, referer);
+  if (!normalizedCandidate || seen.has(normalizedCandidate) || depth > 3) {
+    return null;
+  }
+  seen.add(normalizedCandidate);
+
+  const verified = await probeVideoUrl(
+    normalizedCandidate,
+    referer ? { Referer: referer } : {}
+  );
+  if (verified) {
+    return {
+      url: verified.url,
+      referer,
+      contentType: verified.contentType,
+      provider: inferProviderFromVideo(verified.url, verified.contentType)
+    };
+  }
+
+  const extractedUrls = await fetchPlayerMediaUrls(normalizedCandidate, referer || normalizedCandidate);
+  for (const extractedUrl of extractedUrls) {
+    const resolved = await resolvePlayableUrl(extractedUrl, normalizedCandidate, seen, depth + 1);
+    if (resolved) {
+      return resolved;
     }
   }
 
