@@ -19,6 +19,7 @@
   const HERO_ROTATE_MS = 4000;
   const CAROUSEL_AUTOPLAY_MS = 4000;
   const AUDIO_PREF_KEY = 'streamflix_player_audio_preference';
+  const DETAIL_EPISODES_PAGE_SIZE = 30;
 
   const $ = (id) => document.getElementById(id);
   const toastEl = $('toast');
@@ -729,10 +730,25 @@
 
   const detailModal = $('detailModal');
 
+  function detailSeasonKey(season, seasonIndex) {
+    return `${seasonIndex}:${season?.SeasonNumber || 0}`;
+  }
+
+  function getDetailEpisodePage(season, seasonIndex) {
+    const key = detailSeasonKey(season, seasonIndex);
+    return Math.max(1, Number(state.detailEpisodePages?.[key] || 1));
+  }
+
+  function setDetailEpisodePage(season, seasonIndex, page) {
+    const key = detailSeasonKey(season, seasonIndex);
+    state.detailEpisodePages = { ...(state.detailEpisodePages || {}), [key]: Math.max(1, page) };
+  }
+
   async function openDetail(id) {
     try {
       const data = await API.seriesDetail(id);
       state.detail = data;
+      state.detailEpisodePages = {};
       $('detailBg').style.backgroundImage = `url('${data.BackdropUrl || data.PosterUrl}')`;
       $('detailTitle').textContent = data.Title;
       $('detailMeta').textContent = [
@@ -758,10 +774,10 @@
       };
       seasonSelect.onchange = () => {
         const selectedSeasonIndex = Number(seasonSelect.value);
-        renderEpisodes(data.seasons[selectedSeasonIndex]);
+        renderEpisodes(data.seasons[selectedSeasonIndex], selectedSeasonIndex, 1);
         renderDetailAudioOptions(data, selectedSeasonIndex);
       };
-      renderEpisodes(data.seasons[0]);
+      renderEpisodes(data.seasons[0], 0, 1);
       await renderDetailAudioOptions(data, 0);
 
       $('detailPlay').onclick = () => openPlaybackFromDetail(
@@ -778,11 +794,72 @@
     }
   }
 
-  function renderEpisodes(season) {
+  function renderDetailEpisodePagination(season, seasonIndex, currentPage, totalPages) {
+    const paginationEl = $('detailEpisodePagination');
+    paginationEl.innerHTML = '';
+    paginationEl.hidden = totalPages <= 1;
+    if (totalPages <= 1) return;
+
+    const goToPage = (page) => {
+      setDetailEpisodePage(season, seasonIndex, page);
+      renderEpisodes(season, seasonIndex, page);
+    };
+
+    const arrow = (label, target, active) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'page-btn page-step';
+      btn.textContent = label;
+      btn.disabled = !active;
+      if (active) btn.addEventListener('click', () => goToPage(target));
+      return btn;
+    };
+
+    paginationEl.appendChild(arrow('‹ Anterior', currentPage - 1, currentPage > 1));
+
+    const numbers = document.createElement('div');
+    numbers.className = 'page-numbers';
+    pageWindow(currentPage, totalPages).forEach((page) => {
+      if (page === '…') {
+        const gap = document.createElement('span');
+        gap.className = 'page-gap';
+        gap.textContent = '…';
+        numbers.appendChild(gap);
+        return;
+      }
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'page-btn' + (page === currentPage ? ' active' : '');
+      btn.textContent = page;
+      if (page === currentPage) btn.setAttribute('aria-current', 'page');
+      else btn.addEventListener('click', () => goToPage(page));
+      numbers.appendChild(btn);
+    });
+    paginationEl.appendChild(numbers);
+
+    const summary = document.createElement('span');
+    summary.className = 'page-summary';
+    const totalEpisodes = Array.isArray(season?.episodes) ? season.episodes.length : 0;
+    summary.textContent = `${currentPage} / ${totalPages} · ${totalEpisodes} episodios`;
+    paginationEl.appendChild(summary);
+
+    paginationEl.appendChild(arrow('Siguiente ›', currentPage + 1, currentPage < totalPages));
+  }
+
+  function renderEpisodes(season, seasonIndex = 0, requestedPage = null) {
     const listEl = $('episodeList');
     listEl.innerHTML = '';
+    $('detailEpisodePagination').hidden = true;
     if (!season) return;
-    season.episodes.forEach((episode, index) => {
+
+    const episodes = Array.isArray(season.episodes) ? season.episodes : [];
+    const totalPages = Math.max(1, Math.ceil(episodes.length / DETAIL_EPISODES_PAGE_SIZE));
+    const currentPage = Math.min(totalPages, requestedPage || getDetailEpisodePage(season, seasonIndex));
+    const start = (currentPage - 1) * DETAIL_EPISODES_PAGE_SIZE;
+    const pageEpisodes = episodes.slice(start, start + DETAIL_EPISODES_PAGE_SIZE);
+
+    pageEpisodes.forEach((episode, pageIndex) => {
+      const absoluteIndex = start + pageIndex;
       const row = document.createElement('div');
       row.className = 'episode-row';
       const mins = episode.DurationSec ? Math.round(episode.DurationSec / 60) + ' min' : '';
@@ -797,13 +874,16 @@
         <div class="episode-play">▶</div>`;
       row.addEventListener('click', () => {
         closeModal(detailModal);
-        Player.open(season.episodes, index, state.detail.Title, {
+        Player.open(episodes, absoluteIndex, state.detail.Title, {
           seriesId: state.detail.Id,
           hooks: createPlayerHooks()
         });
       });
       listEl.appendChild(row);
     });
+
+    setDetailEpisodePage(season, seasonIndex, currentPage);
+    renderDetailEpisodePagination(season, seasonIndex, currentPage, totalPages);
   }
 
   async function playSeries(id) {

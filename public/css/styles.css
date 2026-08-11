@@ -193,6 +193,10 @@ button { font-family: inherit; cursor: pointer; }
 .episode-dur { font-size: 12px; color: var(--muted); flex: none; }
 .episode-play { font-size: 22px; color: var(--text); flex: none; opacity: .0; transition: opacity .15s; }
 .episode-row:hover .episode-play { opacity: 1; }
+.detail-episode-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 18px; flex-wrap: wrap; }
+.detail-episode-pagination .page-numbers { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.detail-episode-pagination .page-summary { color: var(--muted); font-size: 13px; }
 
 /* ===================== AUTH ===================== */
 .auth-card { max-width: 400px; padding: 34px 30px; }
