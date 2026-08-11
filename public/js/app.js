@@ -77,6 +77,7 @@
     if (audio) localStorage.setItem(audioPrefKey(seriesId), audio);
     else localStorage.removeItem(audioPrefKey(seriesId));
   };
+  const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
 
   function firstEpisodeOf(detail, seasonIndex = 0) {
     const season = detail?.seasons?.[seasonIndex];
@@ -332,7 +333,7 @@
         <div class="card-title">${series.Title}</div>
         <div class="card-genres">${series.Genres || ''}</div>
       </div>`;
-    card.addEventListener('click', () => openDetail(series.Id));
+    card.addEventListener('click', () => openDetail(series.Id, series));
     return card;
   }
 
@@ -602,7 +603,7 @@
     ].filter(Boolean).join('  ·  ');
     heroDescEl.textContent = slide.Description || '';
     $('heroPlay').onclick = () => playSeries(slide.Id);
-    $('heroInfo').onclick = () => openDetail(slide.Id);
+    $('heroInfo').onclick = () => openDetail(slide.Id, slide);
 
     heroDotsEl.innerHTML = '';
     state.heroSlides.forEach((_item, index) => {
@@ -744,9 +745,42 @@
     state.detailEpisodePages = { ...(state.detailEpisodePages || {}), [key]: Math.max(1, page) };
   }
 
-  async function openDetail(id) {
+  function setDetailLoadingState(seed = null) {
+    state.detail = null;
+    state.detailEpisodePages = {};
+    $('detailBg').style.backgroundImage = seed ? `url('${seed.BackdropUrl || seed.PosterUrl || ''}')` : '';
+    $('detailTitle').textContent = seed?.Title || 'Cargando...';
+    $('detailMeta').textContent = seed
+      ? [
+          getContentTypeMeta(seed.ContentType).label,
+          seed.ReleaseYear,
+          seed.Genres,
+          seed.Rating != null ? '★ ' + Number(seed.Rating).toFixed(1) : ''
+        ].filter(Boolean).join('  ·  ')
+      : '';
+    $('detailDesc').textContent = seed?.Description || 'Estamos preparando la ficha y los episodios.';
+    $('episodeList').innerHTML = '<div class="empty-state">Cargando episodios...</div>';
+    $('detailEpisodePagination').innerHTML = '';
+    $('detailEpisodePagination').hidden = true;
+    $('seasonSelect').innerHTML = '';
+    $('seasonSelectGroup').hidden = true;
+    $('detailAudioGroup').hidden = true;
+    $('detailAudioSelect').innerHTML = '';
+    $('detailPlay').disabled = true;
+    $('detailListBtn').disabled = true;
+  }
+
+  async function openDetail(id, seed = null) {
+    const requestId = (state.detailRequestId || 0) + 1;
+    state.detailRequestId = requestId;
+    setDetailLoadingState(seed);
+    openModal(detailModal);
+    await nextFrame();
+
     try {
       const data = await API.seriesDetail(id);
+      if (state.detailRequestId !== requestId) return;
+
       state.detail = data;
       state.detailEpisodePages = {};
       $('detailBg').style.backgroundImage = `url('${data.BackdropUrl || data.PosterUrl}')`;
@@ -778,7 +812,7 @@
         renderDetailAudioOptions(data, selectedSeasonIndex);
       };
       renderEpisodes(data.seasons[0], 0, 1);
-      await renderDetailAudioOptions(data, 0);
+      renderDetailAudioOptions(data, 0);
 
       $('detailPlay').onclick = () => openPlaybackFromDetail(
         data,
@@ -786,11 +820,14 @@
         0
       );
       $('detailPlay').textContent = data.ContentType === 'movie' ? '▶ Ver película' : '▶ Reproducir';
+      $('detailPlay').disabled = false;
+      $('detailListBtn').disabled = false;
 
       updateListButton();
-      openModal(detailModal);
     } catch (err) {
+      if (state.detailRequestId !== requestId) return;
       toast(err.message);
+      closeModal(detailModal);
     }
   }
 

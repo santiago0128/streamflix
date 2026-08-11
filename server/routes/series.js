@@ -1023,24 +1023,31 @@ router.get('/series/:id', async (req, res) => {
                WHERE s.SeriesId = @id
                ORDER BY s.SeasonNumber, e.EpisodeNumber`);
 
+    const episodesBySeasonId = new Map();
+    for (const episode of episodesRes.recordset) {
+      const prepared = {
+        ...episode,
+        SourceVideoUrl: episode.VideoUrl,
+        VideoUrl: (() => {
+          const provider = String(episode.Provider || 'file').toLowerCase();
+          // Sólo los embeds se reproducen contra su origen: el resto pasa por
+          // el proxy, que es lo que permite usar el reproductor propio aunque
+          // el CDN de origen no mande CORS.
+          if (provider === 'embed') {
+            return episode.VideoUrl;
+          }
+          return buildPlaybackUrl(req, episode.Id);
+        })()
+      };
+
+      const current = episodesBySeasonId.get(episode.SeasonId);
+      if (current) current.push(prepared);
+      else episodesBySeasonId.set(episode.SeasonId, [prepared]);
+    }
+
     const seasons = seasonsRes.recordset.map((s) => ({
       ...s,
-      episodes: episodesRes.recordset
-        .filter((e) => e.SeasonId === s.Id)
-        .map((e) => ({
-          ...e,
-          SourceVideoUrl: e.VideoUrl,
-          VideoUrl: (() => {
-            const provider = String(e.Provider || 'file').toLowerCase();
-            // Sólo los embeds se reproducen contra su origen: el resto pasa por
-            // el proxy, que es lo que permite usar el reproductor propio aunque
-            // el CDN de origen no mande CORS.
-            if (provider === 'embed') {
-              return e.VideoUrl;
-            }
-            return buildPlaybackUrl(req, e.Id);
-          })()
-        })),
+      episodes: episodesBySeasonId.get(s.Id) || [],
     }));
 
     res.json({ ...series, genres: genresRes.recordset, seasons });
