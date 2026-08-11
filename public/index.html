@@ -129,6 +129,10 @@
           <label for="seasonSelect">Temporada:</label>
           <select id="seasonSelect"></select>
         </div>
+        <div class="season-select detail-audio-select" id="detailAudioGroup" hidden>
+          <label for="detailAudioSelect">Idioma:</label>
+          <select id="detailAudioSelect"></select>
+        </div>
         <div class="episode-list" id="episodeList"></div>
       </div>
     </div>
@@ -194,6 +198,7 @@
           <button class="ctrl" id="btnNext" aria-label="Siguiente" title="Episodio siguiente">⏭</button>
           <span class="time" id="timeLabel">0:00 / 0:00</span>
           <div class="ctrl-spacer"></div>
+          <select class="audio-quick-select" id="audioTrackSelect" title="Idioma de audio" hidden></select>
           <select class="ep-quick-select" id="epQuickSelect" title="Cambiar de capítulo"></select>
           <div class="player-settings">
             <button class="ctrl" id="btnSettings" aria-label="Opciones de reproducción" title="Opciones">⚙</button>

@@ -159,9 +159,14 @@ function normalizeSourceRef(sourceRef) {
   return String(sourceRef).replace(/^jkanime:/i, '');
 }
 
-function buildPlaybackUrl(req, episodeId) {
-  return `/api/episodes/${episodeId}/stream`;
+function buildPlaybackUrl(_req, episodeId, options = {}) {
+  const params = new URLSearchParams();
+  if (options.audio) params.set('audio', options.audio);
+  const qs = params.toString();
+  return `/api/episodes/${episodeId}/stream${qs ? `?${qs}` : ''}`;
 }
+
+const UPSTREAM_TIMEOUT_MS = 5000;
 
 function looksLikeDirectVideoUrl(url) {
   return /\.(m3u8|mp4|webm|mov)(?:$|\?)/i.test(String(url || ''));
@@ -205,6 +210,9 @@ function requestUpstream(url, headers = {}, redirectCount = 0) {
     );
 
     upstream.on('error', reject);
+    upstream.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
+      upstream.destroy(new Error(`Timeout consultando ${url}`));
+    });
     upstream.end();
   });
 }
@@ -257,6 +265,9 @@ function requestText(url, headers = {}, redirectCount = 0) {
     );
 
     upstream.on('error', reject);
+    upstream.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
+      upstream.destroy(new Error(`Timeout leyendo ${url}`));
+    });
     upstream.end();
   });
 }
@@ -325,6 +336,9 @@ async function probeVideoUrl(url, extraHeaders = {}) {
         );
 
         req.on('error', reject);
+        req.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
+          req.destroy(new Error(`Timeout validando ${normalizedUrl}`));
+        });
         req.end();
       });
 
@@ -518,29 +532,144 @@ async function fetchPlayerMediaUrls(embedUrl, pageUrl) {
   return [];
 }
 
-function parsePlayerOptions(snapshot) {
-  if (!snapshot?.PlayerOptionsJson) {
-    return [];
-  }
-
+function parseJsonArray(raw) {
+  if (!raw) return [];
   try {
-    const parsed = JSON.parse(snapshot.PlayerOptionsJson);
+    const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 }
 
-function collectEmbedCandidates(snapshot, episode) {
-  const urls = [
-    snapshot?.VideoSrcReferer,
-    snapshot?.VerifiedVideoReferer,
-    snapshot?.PrimaryVideoUrl,
-    episode?.VideoUrl
-  ];
+function asSnapshotList(snapshotOrList) {
+  if (Array.isArray(snapshotOrList)) {
+    return snapshotOrList.filter(Boolean);
+  }
+  return snapshotOrList ? [snapshotOrList] : [];
+}
+
+function parsePlayerOptions(snapshotOrList) {
+  return asSnapshotList(snapshotOrList).flatMap((snapshot) => [
+    ...parseJsonArray(snapshot?.PlayerOptionsJson),
+    ...parseJsonArray(snapshot?.LocalPlayerOptionsJson)
+  ]);
+}
+
+function parseServerOptions(snapshotOrList) {
+  return asSnapshotList(snapshotOrList).flatMap((snapshot) => parseJsonArray(snapshot?.ServerOptionsJson));
+}
+
+function normalizeAudioCode(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+
+  if (raw === '1') return 'ja';
+  if (raw === '3') return 'es-la';
+
+  if (['es-la', 'lat', 'la', 'latin', 'latino', 'dob', 'dub'].includes(raw)) {
+    return 'es-la';
+  }
+
+  if (['es-es', 'cast', 'castellano'].includes(raw)) {
+    return 'es-es';
+  }
+
+  if (['es', 'esp', 'spanish'].includes(raw)) {
+    return 'es';
+  }
+
+  if (['ja', 'jp', 'jpn', 'jap', 'japanese', 'sub', 'subbed', 'vo', 'original'].includes(raw)) {
+    return 'ja';
+  }
+
+  return raw;
+}
+
+function labelForAudio(code) {
+  switch (normalizeAudioCode(code)) {
+    case 'es-la': return 'Latino';
+    case 'es-es': return 'Castellano';
+    case 'es': return 'Español';
+    case 'ja': return 'Japonés';
+    default: return 'Original';
+  }
+}
+
+function audioPreferenceFromReq(req) {
+  return normalizeAudioCode(req?.query?.audio);
+}
+
+function collectAudioOptions(snapshot) {
+  const seen = new Set();
+  return [
+    ...parseServerOptions(snapshot).map((option) =>
+      normalizeAudioCode(option?.languageCode || option?.lang || option?.language)
+    ),
+    ...parsePlayerOptions(snapshot).map((option) =>
+      normalizeAudioCode(option?.languageCode || option?.lang || option?.language)
+    )
+  ]
+    .filter((code) => {
+      if (!code || seen.has(code)) return false;
+      seen.add(code);
+      return true;
+    })
+    .map((code) => ({ code, label: labelForAudio(code) }))
+    .sort((a, b) => {
+      const order = { ja: 0, 'es-la': 1, 'es-es': 2, es: 3 };
+      return (order[a.code] ?? 99) - (order[b.code] ?? 99);
+    });
+}
+
+function serverPriority(option) {
+  const name = String(option?.server || '').toLowerCase();
+  if (name.includes('vidhide')) return 0;
+  if (name.includes('streamwish')) return 1;
+  if (name.includes('voe')) return 2;
+  if (name.includes('mixdrop')) return 3;
+  if (name.includes('mega')) return 4;
+  if (name.includes('mediafire')) return 5;
+  if (name.includes('mp4upload')) return 6;
+  if (name.includes('dood')) return 7;
+  if (name.includes('streamtape')) return 8;
+  return 50;
+}
+
+function serverOptionsForAudio(snapshot, preferredAudio = null) {
+  const options = parseServerOptions(snapshot)
+    .filter((option) => !preferredAudio ||
+      normalizeAudioCode(option?.languageCode || option?.lang || option?.language) === preferredAudio
+    )
+    .sort((a, b) => serverPriority(a) - serverPriority(b));
+
+  return options;
+}
+
+function collectEmbedCandidates(snapshot, episode, preferredAudio = null) {
+  const urls = [];
+
+  for (const option of serverOptionsForAudio(snapshot, preferredAudio)) {
+    urls.push(option?.generatedEmbedUrl);
+  }
 
   for (const option of parsePlayerOptions(snapshot)) {
+    const language = normalizeAudioCode(option?.languageCode || option?.lang || option?.language);
+    if (preferredAudio && language && language !== preferredAudio) continue;
     urls.push(option?.embedUrl, option?.url, option?.playerUrl);
+  }
+
+  if (!preferredAudio) {
+    for (const item of asSnapshotList(snapshot)) {
+      urls.push(
+        item?.VideoSrcReferer,
+        item?.VerifiedVideoReferer,
+        item?.PrimaryVideoUrl
+      );
+    }
+    urls.push(
+      episode?.VideoUrl
+    );
   }
 
   const seen = new Set();
@@ -553,13 +682,25 @@ function collectEmbedCandidates(snapshot, episode) {
     });
 }
 
-function collectDirectVideoCandidates(snapshot, episode) {
+function collectDirectVideoCandidates(snapshot, episode, preferredAudio = null) {
   const candidates = [
-    { url: snapshot?.VideoSrcUrl, referer: snapshot?.VideoSrcReferer },
-    { url: snapshot?.VerifiedVideoUrl, referer: snapshot?.VerifiedVideoReferer },
-    { url: snapshot?.PrimaryVideoUrl, referer: snapshot?.VerifiedVideoReferer || snapshot?.VideoSrcReferer },
-    { url: episode?.VideoUrl, referer: null }
+    ...serverOptionsForAudio(snapshot, preferredAudio).map((option) => ({
+      url: option?.decodedRemoteUrl,
+      referer: option?.generatedEmbedUrl
+    }))
   ];
+
+  for (const item of asSnapshotList(snapshot)) {
+    candidates.push(
+      { url: item?.VideoSrcUrl, referer: item?.VideoSrcReferer },
+      { url: item?.VerifiedVideoUrl, referer: item?.VerifiedVideoReferer },
+      { url: item?.PrimaryVideoUrl, referer: item?.VerifiedVideoReferer || item?.VideoSrcReferer }
+    );
+  }
+
+  if (!preferredAudio) {
+    candidates.push({ url: episode?.VideoUrl, referer: null });
+  }
 
   const seen = new Set();
   return candidates
@@ -577,8 +718,8 @@ function collectDirectVideoCandidates(snapshot, episode) {
     });
 }
 
-async function resolveDirectVideoCandidate(snapshot, episode) {
-  for (const candidate of collectDirectVideoCandidates(snapshot, episode)) {
+async function resolveDirectVideoCandidate(snapshot, episode, preferredAudio = null) {
+  for (const candidate of collectDirectVideoCandidates(snapshot, episode, preferredAudio)) {
     const verified = await probeVideoUrl(
       candidate.url,
       candidate.referer ? { Referer: candidate.referer } : {}
@@ -597,12 +738,15 @@ async function resolveDirectVideoCandidate(snapshot, episode) {
   return null;
 }
 
-async function refreshVideoSourceFromSnapshot(snapshot) {
-  const embedCandidates = collectEmbedCandidates(snapshot, null);
+async function refreshVideoSourceFromSnapshot(snapshot, preferredAudio = null) {
+  const embedCandidates = collectEmbedCandidates(snapshot, null, preferredAudio);
 
   for (const embedUrl of embedCandidates) {
     try {
-      const resolved = await resolvePlayableUrl(embedUrl, snapshot?.EpisodePageUrl || embedUrl);
+      const referer = asSnapshotList(snapshot).find((item) =>
+        item?.EpisodePageUrl || item?.SeriesUrl
+      );
+      const resolved = await resolvePlayableUrl(embedUrl, referer?.EpisodePageUrl || referer?.SeriesUrl || embedUrl);
       if (resolved) return resolved;
     } catch {
       continue;
@@ -643,44 +787,69 @@ async function resolvePlayableUrl(candidateUrl, referer, seen = new Set(), depth
   return null;
 }
 
-function fallbackEmbedUrl(snapshot, episode) {
-  return collectEmbedCandidates(snapshot, episode)[0] || null;
+function fallbackEmbedUrl(snapshot, episode, preferredAudio = null) {
+  return collectEmbedCandidates(snapshot, episode, preferredAudio)[0] || null;
 }
 
 async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = undefined) {
   const snapshot = providedSnapshot === undefined ? await findEpisodeSnapshot(pool, episode) : providedSnapshot;
-  const direct = await resolveDirectVideoCandidate(snapshot, episode);
+  const audioOptions = collectAudioOptions(snapshot);
+  const requestedAudio = audioPreferenceFromReq(req);
+  const selectedAudio = audioOptions.find((option) => option.code === requestedAudio)?.code
+    || (audioOptions[0] && audioOptions[0].code)
+    || null;
+  const preferredRefresh = selectedAudio ? await refreshVideoSourceFromSnapshot(snapshot, selectedAudio) : null;
+  const direct = preferredRefresh ? null : await resolveDirectVideoCandidate(snapshot, episode, selectedAudio);
+
+  if (preferredRefresh) {
+    return {
+      provider: preferredRefresh.provider || 'file',
+      url: buildPlaybackUrl(req, episode.Id, { audio: selectedAudio }),
+      proxied: true,
+      sourceUrl: preferredRefresh.url,
+      referer: preferredRefresh.referer,
+      contentType: preferredRefresh.contentType,
+      refreshed: true,
+      canTrackProgress: true,
+      audio: selectedAudio,
+      audioOptions
+    };
+  }
 
   if (direct) {
     return {
       provider: direct.provider,
-      url: buildPlaybackUrl(req, episode.Id),
+      url: buildPlaybackUrl(req, episode.Id, { audio: selectedAudio }),
       proxied: true,
       sourceUrl: direct.url,
       referer: direct.referer,
       contentType: direct.contentType,
       refreshed: false,
-      canTrackProgress: true
+      canTrackProgress: true,
+      audio: selectedAudio,
+      audioOptions
     };
   }
 
   if (snapshot) {
-    const refreshed = await refreshVideoSourceFromSnapshot(snapshot);
+    const refreshed = await refreshVideoSourceFromSnapshot(snapshot, selectedAudio);
     if (refreshed) {
       return {
         provider: refreshed.provider || 'file',
-        url: buildPlaybackUrl(req, episode.Id),
+        url: buildPlaybackUrl(req, episode.Id, { audio: selectedAudio }),
         proxied: true,
         sourceUrl: refreshed.url,
         referer: refreshed.referer,
         contentType: refreshed.contentType,
         refreshed: true,
-        canTrackProgress: true
+        canTrackProgress: true,
+        audio: selectedAudio,
+        audioOptions
       };
     }
   }
 
-  const fallbackUrl = fallbackEmbedUrl(snapshot, episode);
+  const fallbackUrl = fallbackEmbedUrl(snapshot, episode, selectedAudio);
   if (fallbackUrl) {
     return {
       provider: 'embed',
@@ -690,27 +859,33 @@ async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = und
       referer: null,
       contentType: null,
       refreshed: false,
-      canTrackProgress: false
+      canTrackProgress: false,
+      audio: selectedAudio,
+      audioOptions
     };
   }
 
-  const fallbackProvider = inferProviderFromVideo(
-    episode?.VideoUrl,
-    null,
-    String(episode?.Provider || 'file').toLowerCase()
-  );
-  const fallbackDirectUrl = String(episode?.VideoUrl || '');
+  const fallbackProvider = selectedAudio
+    ? 'embed'
+    : inferProviderFromVideo(
+      episode?.VideoUrl,
+      null,
+      String(episode?.Provider || 'file').toLowerCase()
+    );
+  const fallbackDirectUrl = selectedAudio ? '' : String(episode?.VideoUrl || '');
 
   if (fallbackDirectUrl && fallbackProvider !== 'embed') {
     return {
       provider: fallbackProvider,
-      url: buildPlaybackUrl(req, episode.Id),
+      url: buildPlaybackUrl(req, episode.Id, { audio: selectedAudio }),
       proxied: true,
       sourceUrl: fallbackDirectUrl,
       referer: null,
       contentType: null,
       refreshed: false,
-      canTrackProgress: true
+      canTrackProgress: true,
+      audio: selectedAudio,
+      audioOptions
     };
   }
 
@@ -722,7 +897,9 @@ async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = und
     referer: null,
     contentType: null,
     refreshed: false,
-    canTrackProgress: fallbackProvider !== 'embed'
+    canTrackProgress: fallbackProvider !== 'embed',
+    audio: selectedAudio,
+    audioOptions
   };
 }
 
@@ -877,32 +1054,15 @@ router.get('/series/:id', async (req, res) => {
 // CDN exigen. Se consulta aparte porque las tablas las crea el importador y
 // pueden no existir todavía: si falta, se reproduce igual con la URL guardada.
 async function findEpisodeSnapshot(pool, episode) {
-  const sources = [
-    {
-      table: 'dbo.JkAnimeEpisodeSnapshots',
-      prefixes: ['jkanime:'],
-      matchSeason: false
-    },
-    {
-      table: 'dbo.PelisPlusSnapshots',
-      prefixes: ['pelisplushd:', 'pelisflix200:', 'pelismart:', 'pelisplus:', 'cuevana3:'],
-      matchSeason: true
-    }
-  ];
-
   const sourceRef = String(episode.SourceRef || '');
+  const normalizedSlug = normalizeSourceRef(sourceRef);
+  const snapshots = [];
 
-  for (const source of sources) {
-    const matchedPrefix = (source.prefixes || []).find((prefix) =>
-      sourceRef.toLowerCase().startsWith(prefix)
-    );
-    if (!matchedPrefix) continue;
-
-    try {
-      const result = await pool.request()
-        .input('slug', sql.NVarChar(255), sourceRef.slice(matchedPrefix.length))
+  try {
+    if (sourceRef.toLowerCase().startsWith('jkanime:')) {
+      const jkResult = await pool.request()
+        .input('slug', sql.NVarChar(255), normalizedSlug)
         .input('episodeNumber', sql.Int, episode.EpisodeNumber)
-        .input('seasonNumber', sql.Int, episode.SeasonNumber)
         .query(`
           SELECT TOP 1
             EpisodePageUrl,
@@ -912,22 +1072,80 @@ async function findEpisodeSnapshot(pool, episode) {
             VerifiedVideoReferer,
             PrimaryVideoUrl,
             PrimaryVideoSource,
-            PlayerOptionsJson
-            FROM ${source.table}
-           WHERE SeriesSlug = @slug
-             AND EpisodeNumber = @episodeNumber
-             ${source.matchSeason ? 'AND SeasonNumber = @seasonNumber' : ''}
-           ORDER BY UpdatedAt DESC, Id DESC
+            LocalPlayerOptionsJson,
+            ServerOptionsJson,
+            DownloadOptionsJson,
+            PlayerEmbedsJson,
+            NULL AS PlayerOptionsJson
+          FROM dbo.JkAnimeEpisodeSnapshots
+          WHERE SeriesSlug = @slug
+            AND EpisodeNumber = @episodeNumber
+          ORDER BY UpdatedAt DESC, Id DESC
         `);
+      snapshots.push(...jkResult.recordset);
 
-      return result.recordset[0] || null;
-    } catch (err) {
-      console.error(`No pude leer ${source.table}:`, err.message);
-      return null;
+      const extraAnime = await pool.request()
+        .input('slug', sql.NVarChar(255), normalizedSlug)
+        .input('episodeNumber', sql.Int, episode.EpisodeNumber)
+        .input('seasonNumber', sql.Int, episode.SeasonNumber)
+        .query(`
+          SELECT
+            EpisodePageUrl,
+            VideoSrcUrl,
+            VideoSrcReferer,
+            VerifiedVideoUrl,
+            VerifiedVideoReferer,
+            PrimaryVideoUrl,
+            PrimaryVideoSource,
+            NULL AS LocalPlayerOptionsJson,
+            NULL AS ServerOptionsJson,
+            NULL AS DownloadOptionsJson,
+            NULL AS PlayerEmbedsJson,
+            PlayerOptionsJson
+          FROM dbo.PelisPlusSnapshots
+          WHERE ContentType = 'anime'
+            AND SeriesSlug = @slug
+            AND EpisodeNumber = @episodeNumber
+            AND SeasonNumber = @seasonNumber
+          ORDER BY UpdatedAt DESC, Id DESC
+        `);
+      snapshots.push(...extraAnime.recordset);
+      return snapshots;
     }
-  }
 
-  return null;
+    const prefixes = ['pelisplushd:', 'pelisflix200:', 'pelismart:', 'pelisplus:', 'cuevana3:', 'henaojara:'];
+    const matchedPrefix = prefixes.find((prefix) => sourceRef.toLowerCase().startsWith(prefix));
+    if (!matchedPrefix) return [];
+
+    const result = await pool.request()
+      .input('slug', sql.NVarChar(255), sourceRef.slice(matchedPrefix.length))
+      .input('episodeNumber', sql.Int, episode.EpisodeNumber)
+      .input('seasonNumber', sql.Int, episode.SeasonNumber)
+      .query(`
+        SELECT
+          EpisodePageUrl,
+          VideoSrcUrl,
+          VideoSrcReferer,
+          VerifiedVideoUrl,
+          VerifiedVideoReferer,
+          PrimaryVideoUrl,
+          PrimaryVideoSource,
+          NULL AS LocalPlayerOptionsJson,
+          NULL AS ServerOptionsJson,
+          NULL AS DownloadOptionsJson,
+          NULL AS PlayerEmbedsJson,
+          PlayerOptionsJson
+        FROM dbo.PelisPlusSnapshots
+        WHERE SeriesSlug = @slug
+          AND EpisodeNumber = @episodeNumber
+          AND SeasonNumber = @seasonNumber
+        ORDER BY UpdatedAt DESC, Id DESC
+      `);
+    return result.recordset;
+  } catch (err) {
+    console.error('No pude leer snapshots del episodio:', err.message);
+    return [];
+  }
 }
 
 router.get('/episodes/:id/playback', async (req, res) => {
@@ -998,13 +1216,14 @@ router.get('/episodes/:id/stream', async (req, res) => {
     }
 
     const snapshot = await findEpisodeSnapshot(pool, episode);
-    const direct = await resolveDirectVideoCandidate(snapshot, episode);
-    const refreshed = direct ? null : await refreshVideoSourceFromSnapshot(snapshot);
+    const preferredAudio = audioPreferenceFromReq(req);
+    const direct = await resolveDirectVideoCandidate(snapshot, episode, preferredAudio);
+    const refreshed = direct ? null : await refreshVideoSourceFromSnapshot(snapshot, preferredAudio);
 
     const candidates = [
       direct && { url: direct.url, referer: direct.referer },
       refreshed && { url: refreshed.url, referer: refreshed.referer },
-      ...collectDirectVideoCandidates(snapshot, episode)
+      ...collectDirectVideoCandidates(snapshot, episode, preferredAudio)
     ].filter(Boolean);
 
     if (!candidates.length) {
@@ -1072,7 +1291,7 @@ router.get('/episodes/:id/stream', async (req, res) => {
       // caducar enseguida. Si el snapshot todavía conserva el embed del que
       // salió, se vuelve a resolver aquí mismo para obtener un enlace fresco.
       if (!req.query.u && snapshot) {
-        const refreshed = await refreshVideoSourceFromSnapshot(snapshot);
+        const refreshed = await refreshVideoSourceFromSnapshot(snapshot, preferredAudio);
         if (refreshed) {
           selected = { url: refreshed.url, referer: refreshed.referer };
           target = selected.url;
@@ -1110,7 +1329,7 @@ router.get('/episodes/:id/stream', async (req, res) => {
         // inventarle segmentos.
         if (!isPlaylistResponse(upstream.headers['content-type'], body)) {
           if (!req.query.u && snapshot) {
-            refreshVideoSourceFromSnapshot(snapshot)
+            refreshVideoSourceFromSnapshot(snapshot, preferredAudio)
               .then(async (refreshed) => {
                 if (!refreshed) {
                   res.status(502);

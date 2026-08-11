@@ -22,6 +22,7 @@ const Player = (() => {
   const btnFs = document.getElementById('btnFs');
   const timeLabel = document.getElementById('timeLabel');
   const volume = document.getElementById('volume');
+  const audioTrackSelect = document.getElementById('audioTrackSelect');
   const epQuickSelect = document.getElementById('epQuickSelect');
   const playerClose = document.getElementById('playerClose');
   const playerCenter = document.getElementById('playerCenter');
@@ -53,14 +54,18 @@ const Player = (() => {
   let hooks = {};
   let lastProgressSentAt = 0;
   let loadSequence = 0;
+  let currentSeriesId = null;
 
   // Preferencias de reproducción, recordadas entre sesiones.
   const SETTINGS_KEY = 'streamflix_player_settings';
+  const AUDIO_PREF_KEY = 'streamflix_player_audio_preference';
   const settings = Object.assign(
     { autoSkipIntro: false, autoSkipOutro: false, autoNext: true },
     (() => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch { return {}; } })()
   );
   const saveSettings = () => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  const audioPrefKey = () => currentSeriesId ? `${AUDIO_PREF_KEY}:${currentSeriesId}` : AUDIO_PREF_KEY;
+  let preferredAudio = '';
 
   // Cuando no hay marca de créditos (series y películas no traen), se considera
   // outro el último tramo del episodio, que es cuando tiene sentido ofrecer el
@@ -82,8 +87,16 @@ const Player = (() => {
   }
 
   function outroStart(ep) {
-    if (ep.OutroStartSec != null) return ep.OutroStartSec;
     const dur = durationOf(ep);
+    if (ep.OutroStartSec != null) {
+      const outro = Number(ep.OutroStartSec);
+      // Algunos episodios llegan con 0 o con un valor fuera de rango. En esos
+      // casos, mostrar "Siguiente episodio" desde el primer segundo solo
+      // confunde: si la marca no encaja con la duración real, se ignora.
+      if (isFinite(outro) && outro > 0 && (!dur || outro < dur)) {
+        return outro;
+      }
+    }
     return dur > 120 ? dur - OUTRO_FALLBACK_SEC : null;
   }
 
@@ -135,6 +148,8 @@ const Player = (() => {
     playlist = list || [];
     index = startIndex || 0;
     seriesTitle = sTitle || '';
+    currentSeriesId = options.seriesId || null;
+    preferredAudio = localStorage.getItem(audioPrefKey()) || '';
     pendingStartTimeSec = Number(options.startTimeSec) > 0 ? Number(options.startTimeSec) : 0;
     hooks = options.hooks || {};
     lastProgressSentAt = 0;
@@ -287,6 +302,32 @@ const Player = (() => {
     });
   }
 
+  function syncAudioSelect(playback) {
+    const options = Array.isArray(playback?.audioOptions) ? playback.audioOptions : [];
+    audioTrackSelect.innerHTML = '';
+
+    if (options.length < 2) {
+      audioTrackSelect.hidden = true;
+      return;
+    }
+
+    const selected =
+      playback?.audio ||
+      options.find((option) => option.code === preferredAudio)?.code ||
+      options[0].code;
+    for (const option of options) {
+      const el = document.createElement('option');
+      el.value = option.code;
+      el.textContent = option.label;
+      el.selected = option.code === selected;
+      audioTrackSelect.appendChild(el);
+    }
+
+    preferredAudio = selected;
+    localStorage.setItem(audioPrefKey(), preferredAudio);
+    audioTrackSelect.hidden = false;
+  }
+
   async function load() {
     const ep = current();
     if (!ep) return;
@@ -310,7 +351,7 @@ const Player = (() => {
 
     let playback = null;
     try {
-      playback = await API.episodePlayback(ep.Id);
+      playback = await API.episodePlayback(ep.Id, { audio: preferredAudio || undefined });
     } catch (error) {
       if (currentLoad !== loadSequence) return;
       mostrarError(
@@ -325,6 +366,7 @@ const Player = (() => {
     const provider = String(playback?.provider || providerOf(ep)).toLowerCase();
     const playbackUrl = playback?.url || ep.VideoUrl;
     ep.__activeProvider = provider;
+    syncAudioSelect(playback);
 
     if (provider === 'embed') {
       setEmbedMode(true);
@@ -544,6 +586,12 @@ const Player = (() => {
   btnNext.addEventListener('click', next);
   btnPrev.addEventListener('click', prev);
   epQuickSelect.addEventListener('change', (e) => goTo(Number(e.target.value)));
+  audioTrackSelect.addEventListener('change', (e) => {
+    preferredAudio = e.target.value || '';
+    localStorage.setItem(audioPrefKey(), preferredAudio);
+    pendingStartTimeSec = Math.trunc(video.currentTime || 0);
+    load();
+  });
 
   skipIntroBtn.addEventListener('click', () => {
     video.currentTime = current().IntroEndSec || video.currentTime;

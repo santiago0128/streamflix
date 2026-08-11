@@ -43,7 +43,11 @@ const API = (() => {
       return req('/series' + (qs.toString() ? '?' + qs : ''));
     },
     seriesDetail: (id) => req('/series/' + id),
-    episodePlayback: (id) => req('/episodes/' + id + '/playback'),
+    episodePlayback: (id, { audio } = {}) => {
+      const qs = new URLSearchParams();
+      if (audio) qs.set('audio', audio);
+      return req('/episodes/' + id + '/playback' + (qs.toString() ? '?' + qs : ''));
+    },
     register: (username, email, password) => req('/auth/register', { method: 'POST', body: { username, email, password } }),
     login: (identifier, password) => req('/auth/login', { method: 'POST', body: { identifier, password } }),
     me: () => req('/auth/me'),

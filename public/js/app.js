@@ -18,6 +18,7 @@
   const PAGE_SIZE = 24;
   const HERO_ROTATE_MS = 4000;
   const CAROUSEL_AUTOPLAY_MS = 4000;
+  const AUDIO_PREF_KEY = 'streamflix_player_audio_preference';
 
   const $ = (id) => document.getElementById(id);
   const toastEl = $('toast');
@@ -68,6 +69,65 @@
     };
   }
 
+  const audioPrefKey = (seriesId) => seriesId ? `${AUDIO_PREF_KEY}:${seriesId}` : AUDIO_PREF_KEY;
+  const getSeriesAudioPref = (seriesId) => localStorage.getItem(audioPrefKey(seriesId)) || '';
+  const setSeriesAudioPref = (seriesId, audio) => {
+    if (!seriesId) return;
+    if (audio) localStorage.setItem(audioPrefKey(seriesId), audio);
+    else localStorage.removeItem(audioPrefKey(seriesId));
+  };
+
+  function firstEpisodeOf(detail, seasonIndex = 0) {
+    const season = detail?.seasons?.[seasonIndex];
+    return season?.episodes?.[0] || null;
+  }
+
+  async function renderDetailAudioOptions(detail, seasonIndex = 0) {
+    const group = $('detailAudioGroup');
+    const select = $('detailAudioSelect');
+    const firstEpisode = firstEpisodeOf(detail, seasonIndex);
+    select.innerHTML = '';
+
+    if (!detail || detail.ContentType !== 'anime' || !firstEpisode) {
+      group.hidden = true;
+      return;
+    }
+
+    try {
+      const playback = await API.episodePlayback(firstEpisode.Id, {
+        audio: getSeriesAudioPref(detail.Id) || undefined
+      });
+      if (state.detail?.Id !== detail.Id) return;
+
+      const options = Array.isArray(playback?.audioOptions) ? playback.audioOptions : [];
+      if (options.length < 2) {
+        group.hidden = true;
+        return;
+      }
+
+      const selected =
+        options.find((option) => option.code === getSeriesAudioPref(detail.Id))?.code ||
+        playback?.audio ||
+        options[0]?.code ||
+        '';
+
+      options.forEach((option) => {
+        const el = document.createElement('option');
+        el.value = option.code;
+        el.textContent = option.label;
+        el.selected = option.code === selected;
+        select.appendChild(el);
+      });
+
+      setSeriesAudioPref(detail.Id, selected);
+      group.hidden = false;
+    } catch {
+      if (state.detail?.Id === detail.Id) {
+        group.hidden = true;
+      }
+    }
+  }
+
   async function openPlaybackFromDetail(detail, episodeId = null, startTimeSec = 0) {
     if (!detail || !detail.seasons || !detail.seasons.length) {
       toast('Este contenido aún no tiene reproducción disponible');
@@ -94,6 +154,7 @@
     }
 
     Player.open(selectedSeason.episodes, selectedIndex, detail.Title, {
+      seriesId: detail.Id,
       startTimeSec,
       hooks: createPlayerHooks(),
     });
@@ -692,8 +753,16 @@
       });
 
       $('seasonSelectGroup').hidden = data.ContentType === 'movie' || data.seasons.length <= 1;
-      seasonSelect.onchange = () => renderEpisodes(data.seasons[Number(seasonSelect.value)]);
+      $('detailAudioSelect').onchange = (event) => {
+        setSeriesAudioPref(data.Id, event.target.value || '');
+      };
+      seasonSelect.onchange = () => {
+        const selectedSeasonIndex = Number(seasonSelect.value);
+        renderEpisodes(data.seasons[selectedSeasonIndex]);
+        renderDetailAudioOptions(data, selectedSeasonIndex);
+      };
       renderEpisodes(data.seasons[0]);
+      await renderDetailAudioOptions(data, 0);
 
       $('detailPlay').onclick = () => openPlaybackFromDetail(
         data,
@@ -728,7 +797,10 @@
         <div class="episode-play">▶</div>`;
       row.addEventListener('click', () => {
         closeModal(detailModal);
-        Player.open(season.episodes, index, state.detail.Title, { hooks: createPlayerHooks() });
+        Player.open(season.episodes, index, state.detail.Title, {
+          seriesId: state.detail.Id,
+          hooks: createPlayerHooks()
+        });
       });
       listEl.appendChild(row);
     });
