@@ -10,6 +10,7 @@
     "db:anime": "node server/db/import-anime.js",
     "db:verify": "node server/db/verify-content.js",
     "db:backdrops": "node server/db/generate-backdrops.js",
+    "db:posters": "node server/db/update-movie-posters.js",
     "db:seasons": "node server/db/backfill-season-sourceref.js"
   },
   "dependencies": {

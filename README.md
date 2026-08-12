@@ -69,6 +69,31 @@ si no se indica ninguna, el script se niega a correr.
 `media/` está en `.gitignore` y Express la sirve con soporte de *range requests*,
 así que el seek del reproductor funciona con archivos locales.
 
+## Portadas de películas
+
+Las portadas de las películas venían de las páginas de origen: miniaturas de
+10-18 KB, borrosas en la ficha grande y colgando de dominios que cambian de
+número cada pocos meses. `npm run db:posters` las sustituye por las de TMDB
+(`image.tmdb.org`, ~80 KB), que es el mismo CDN que ya usaba alguna ficha suelta.
+
+```bash
+npm run db:posters                    # simulación: enseña qué cambiaría
+npm run db:posters -- --apply         # escribe la base
+npm run db:posters -- --ids=4,6       # solo esas fichas
+npm run db:posters -- --type=series   # otro tipo de contenido
+npm run db:posters -- --force         # rehace también las ya migradas
+```
+
+Guarda la URL, no la imagen: no descarga ni re-aloja nada. No necesita
+`TMDB_API_KEY` —la portada sale de la web pública— y es idempotente: sin
+`--force` salta lo que ya apunta a TMDB.
+
+Antes de escribir comprueba que la portada responde, y marca con `⚠` las fichas
+cuyo año no cuadra con el de TMDB: puede ser un año mal puesto en la base o una
+película distinta con el mismo título, y conviene mirarlas a mano. Cuando no
+encuentra una ficha que case con seguridad, deja la portada que hubiera: una
+equivocada es peor que una borrosa, porque nadie la revisa después.
+
 ## Verificar el contenido
 
 `npm run db:verify` comprueba que lo guardado es de verdad la serie que se quiso
@@ -109,6 +134,8 @@ streamflix/
 │  │  ├─ seed.sql          # datos de ejemplo (videos reales)
 │  │  ├─ init.js           # crea BD + aplica schema + seed
 │  │  ├─ import-anime.js   # importador de anime desde la API de Kitsu
+│  │  ├─ tmdb.js           # búsqueda de fichas en TMDB (portadas y banners)
+│  │  ├─ update-movie-posters.js # portadas de películas desde TMDB
 │  │  └─ verify-content.js # verifica que lo guardado sea la serie correcta
 │  ├─ middleware/auth.js   # verificación de JWT
 │  └─ routes/
@@ -150,7 +177,18 @@ El proxy hace tres cosas además de reenviar el stream:
 | `↑` / `↓` | volumen |
 | `n` / `p` | siguiente / anterior episodio |
 | `f` | pantalla completa |
-| `Esc` | cerrar |
+| `Esc` | cerrar el panel abierto; si no hay ninguno, cerrar el reproductor |
+
+Los capítulos se cambian desde el botón de lista de la barra inferior, que abre
+la lista dentro del propio reproductor con el que suena marcado. Antes era un
+`<select>` nativo: a pantalla completa el desplegable del sistema se abría fuera
+del vídeo y con los títulos cortados.
+
+El botón de siguiente capítulo está en la barra inferior y también en el mando
+central, que es el que se ve en el móvil: allí la barra esconde los controles de
+capítulo por falta de sitio, así que sin él la única forma de pasar de capítulo
+con el dedo era esperar a los créditos. En una película, donde no hay siguiente
+ni lista que enseñar, los dos desaparecen.
 
 ## Cómo funciona "saltar intro"
 Cada episodio guarda en la BD los segundos donde empieza y termina la intro

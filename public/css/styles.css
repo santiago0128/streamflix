@@ -255,23 +255,104 @@ button { font-family: inherit; cursor: pointer; }
 .ctrl { background: transparent; border: none; color: #fff; font-size: 20px; line-height: 1;
   padding: 4px; opacity: .9; transition: opacity .12s, transform .06s; }
 .ctrl:hover { opacity: 1; transform: scale(1.12); }
+/* En el último capítulo "siguiente" no lleva a ninguna parte: se apaga, porque
+   un botón que responde igual estando muerto se pulsa dos veces. */
+.ctrl:disabled { opacity: .3; cursor: default; }
+.ctrl:disabled:hover { opacity: .3; transform: none; }
 .ctrl-spacer { flex: 1; }
 .time { font-size: 13px; color: #ddd; font-variant-numeric: tabular-nums; }
-.ep-quick-select { background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.2);
-  border-radius: 6px; padding: 6px 10px; font-size: 13px; max-width: 240px; }
-.ep-quick-select option { background: #16161d; }
-.audio-quick-select { background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.2);
-  border-radius: 6px; padding: 6px 10px; font-size: 13px; min-width: 120px; }
-.audio-quick-select option { background: #16161d; }
+.audio-quick-select { background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.22);
+  border-radius: 999px; padding: 7px 12px; font-size: 13px; min-width: 120px; }
+.audio-quick-select option { background: #1b1030; }
+
+/* ---- Lista de capítulos del reproductor ---- */
+.ep-menu-wrap { position: relative; display: flex; }
+
+.ep-menu-trigger {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 12px; border-radius: 999px;
+  background: rgba(255, 255, 255, .1);
+  border: 1px solid rgba(255, 255, 255, .22);
+  font-size: 13px; font-weight: 600; color: #fff;
+}
+/* .ctrl agranda al pasar por encima; en una píldora con texto eso baila. */
+.ep-menu-trigger:hover { transform: none; background: rgba(255, 255, 255, .18); border-color: rgba(255, 255, 255, .35); }
+.ep-menu-trigger[aria-expanded="true"] { background: var(--accent); border-color: var(--accent); }
+.ep-menu-caret { transition: transform .18s; }
+.ep-menu-trigger[aria-expanded="true"] .ep-menu-caret { transform: rotate(180deg); }
+.ep-menu-current { font-variant-numeric: tabular-nums; }
+
+.ep-menu {
+  position: absolute; bottom: calc(100% + 10px); right: 0; z-index: 6;
+  width: 320px; max-height: min(52vh, 380px);
+  display: flex; flex-direction: column; overflow: hidden;
+  /* Opaco: por debajo está el mando central, y a poco que translúcido sea se
+     le ven las flechas cruzando la lista. */
+  background: #180e2c;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 12px; box-shadow: 0 18px 46px rgba(0, 0, 0, .62);
+  animation: epMenuIn .14s ease-out;
+}
+@keyframes epMenuIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+.ep-menu-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 11px 14px; border-bottom: 1px solid rgba(255, 255, 255, .1);
+  font-size: 13px; font-weight: 700; letter-spacing: .02em;
+}
+.ep-menu-count { font-size: 12px; font-weight: 500; color: var(--muted); }
+
+.ep-menu-list { overflow-y: auto; padding: 6px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
+.ep-menu-list::-webkit-scrollbar { width: 8px; }
+.ep-menu-list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .22); border-radius: 4px; }
+
+.ep-menu-item {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 9px 10px; border: none; border-radius: 8px;
+  background: transparent; color: #e9e2f5; text-align: left; font-size: 13px;
+  transition: background .12s;
+}
+.ep-menu-item:hover { background: rgba(255, 255, 255, .09); }
+.ep-menu-item.is-current { background: rgba(139, 61, 255, .22); color: #fff; }
+
+.ep-menu-num {
+  flex: none; min-width: 26px; height: 26px; padding: 0 6px;
+  display: grid; place-items: center; border-radius: 6px;
+  background: rgba(255, 255, 255, .1);
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.ep-menu-item.is-current .ep-menu-num { background: var(--accent); }
+/* Un capítulo por línea: los títulos largos se cortan antes que descuadrar. */
+.ep-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Barras animadas en el capítulo que suena: se ve de un vistazo dónde vas. */
+.ep-menu-now { flex: none; display: none; align-items: flex-end; gap: 2px; height: 13px; }
+.ep-menu-item.is-current .ep-menu-now { display: flex; }
+.ep-menu-now::before, .ep-menu-now::after {
+  content: ''; width: 3px; border-radius: 2px; background: var(--accent-soft);
+  animation: epBar .9s ease-in-out infinite;
+}
+.ep-menu-now::before { height: 60%; }
+.ep-menu-now::after { height: 100%; animation-delay: .3s; }
+@keyframes epBar { 0%, 100% { transform: scaleY(.4); } 50% { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .ep-menu { animation: none; }
+  .ep-menu-now::before, .ep-menu-now::after { animation: none; }
+}
 .volume { display: flex; align-items: center; gap: 8px; }
 .volume input[type=range] { width: 90px; accent-color: var(--accent); }
 
 /* ===================== REPRODUCTOR: MANDO CENTRAL ===================== */
 /* En escritorio manda la barra de abajo; esto es para el dedo, así que solo
    aparece donde el puntero es grueso o la pantalla es pequeña. */
+/* Por debajo de .player-controls (3): el mando ocupa la pantalla entera, así que
+   con más z-index sus botones atravesaban la lista de capítulos abierta. */
 .player-center {
-  position: absolute; inset: 0; z-index: 4; display: none;
-  align-items: center; justify-content: center; gap: 34px;
+  position: absolute; inset: 0; z-index: 2; display: none;
+  align-items: center; justify-content: center;
+  /* Cuatro botones ya no caben con una separación fija: en un teléfono en
+     vertical se salían de la pantalla. */
+  gap: clamp(16px, 5.5vw, 34px);
   pointer-events: none;
 }
 .player-center .round-btn { pointer-events: auto; }
@@ -282,6 +363,8 @@ button { font-family: inherit; cursor: pointer; }
   transition: background .15s, transform .06s;
 }
 .round-btn:active { transform: scale(.92); background: rgba(0, 0, 0, .7); }
+.round-btn:disabled { opacity: .3; cursor: default; }
+.round-btn:disabled:active { transform: none; background: rgba(0, 0, 0, .45); }
 .round-btn.big { width: 74px; height: 74px; background: rgba(0, 0, 0, .55); }
 /* El "10" va dentro de la flecha circular, como en cualquier reproductor. */
 .round-btn-label {
@@ -329,7 +412,14 @@ button { font-family: inherit; cursor: pointer; }
   /* 44 px es el mínimo por debajo del cual el dedo empieza a fallar. */
   .controls-row .ctrl { min-width: 44px; min-height: 44px; font-size: 22px; }
   .time { font-size: 12px; }
-  .ep-quick-select { max-width: 108px; min-height: 40px; font-size: 12px; }
+
+  /* El icono basta: en una barra de 360 px, la etiqueta del capítulo empuja al
+     resto de controles fuera. La lista abierta sí se ensancha, que es donde de
+     verdad se lee el título. */
+  .ep-menu-trigger { min-height: 40px; padding: 0 10px; }
+  .ep-menu-trigger .ep-menu-current, .ep-menu-trigger .ep-menu-caret { display: none; }
+  .ep-menu { width: min(78vw, 320px); max-height: min(56vh, 320px); }
+  .ep-menu-item { padding: 11px 10px; }   /* dedo, no ratón */
 
   /* La barra de progreso es lo más difícil de acertar con el dedo: se engorda y
      se le da un área de toque mayor que su altura visible. */
@@ -381,7 +471,6 @@ button { font-family: inherit; cursor: pointer; }
   .carousel-track { gap: 12px; }
   .episode-thumb { width: 84px; }
   .player-controls { padding: 14px 16px 16px; }
-  .ep-quick-select { max-width: 130px; }
   .skip-btn { right: 16px; bottom: 100px; }
 }
 

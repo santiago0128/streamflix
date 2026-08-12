@@ -23,13 +23,19 @@ const Player = (() => {
   const timeLabel = document.getElementById('timeLabel');
   const volume = document.getElementById('volume');
   const audioTrackSelect = document.getElementById('audioTrackSelect');
-  const epQuickSelect = document.getElementById('epQuickSelect');
+  const epMenuWrap = document.getElementById('epMenuWrap');
+  const btnEpisodes = document.getElementById('btnEpisodes');
+  const epMenu = document.getElementById('epMenu');
+  const epMenuList = document.getElementById('epMenuList');
+  const epMenuCurrent = document.getElementById('epMenuCurrent');
+  const epMenuCount = document.getElementById('epMenuCount');
   const playerClose = document.getElementById('playerClose');
   const playerCenter = document.getElementById('playerCenter');
   const playerSpinner = document.getElementById('playerSpinner');
   const btnPlayBig = document.getElementById('btnPlayBig');
   const btnBack10 = document.getElementById('btnBack10');
   const btnFwd10 = document.getElementById('btnFwd10');
+  const btnNextCenter = document.getElementById('btnNextCenter');
   const iconPlay = btnPlayBig.querySelector('.icon-play');
   const iconPause = btnPlayBig.querySelector('.icon-pause');
   const playerError = document.getElementById('playerError');
@@ -164,6 +170,8 @@ const Player = (() => {
 
   function close() {
     persistProgress(true);
+    toggleEpMenu(false);
+    settingsPanel.hidden = true;
     if (typeof hooks.onClose === 'function') hooks.onClose(getPlaybackSnapshot());
     teardownSource();
     overlay.hidden = true;
@@ -296,14 +304,64 @@ const Player = (() => {
     console.error('Este navegador no soporta HLS y hls.js no está disponible.');
   }
 
+  /**
+   * Lista de capítulos del menú desplegable.
+   *
+   * Una película es una temporada de un solo episodio técnico: ahí el menú no
+   * dice nada, así que se esconde entero en vez de ofrecer una lista de uno.
+   */
   function buildEpSelect() {
-    epQuickSelect.innerHTML = '';
+    epMenuList.innerHTML = '';
+    epMenuWrap.hidden = playlist.length < 2;
+    if (playlist.length < 2) return;
+
+    epMenuCount.textContent = `${playlist.length} capítulos`;
+
     playlist.forEach((ep, i) => {
-      const opt = document.createElement('option');
-      opt.value = i;
-      opt.textContent = `E${ep.EpisodeNumber} · ${ep.Title}`;
-      epQuickSelect.appendChild(opt);
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'ep-menu-item';
+      row.dataset.index = String(i);
+      row.setAttribute('role', 'option');
+      row.innerHTML =
+        '<span class="ep-menu-num"></span>' +
+        '<span class="ep-menu-label"></span>' +
+        '<span class="ep-menu-now" aria-hidden="true"></span>';
+      row.querySelector('.ep-menu-num').textContent = ep.EpisodeNumber;
+      row.querySelector('.ep-menu-label').textContent = ep.Title || `Capítulo ${ep.EpisodeNumber}`;
+      row.addEventListener('click', () => {
+        toggleEpMenu(false);
+        if (i !== index) goTo(i);
+      });
+      epMenuList.appendChild(row);
     });
+  }
+
+  /** Marca cuál se está viendo, en la lista y en el propio botón. */
+  function syncEpSelection() {
+    const ep = current();
+    epMenuCurrent.textContent = ep ? `E${ep.EpisodeNumber}` : '';
+    for (const row of epMenuList.children) {
+      const activa = Number(row.dataset.index) === index;
+      row.classList.toggle('is-current', activa);
+      row.setAttribute('aria-selected', String(activa));
+    }
+  }
+
+  function toggleEpMenu(abrir) {
+    const mostrar = abrir === undefined ? epMenu.hidden : abrir;
+    epMenu.hidden = !mostrar;
+    btnEpisodes.setAttribute('aria-expanded', String(mostrar));
+    if (mostrar) {
+      settingsPanel.hidden = true;   // dos paneles abiertos se pisan
+      // Con temporadas de cien capítulos, abrir el menú por arriba obliga a
+      // buscar a mano por dónde va la reproducción.
+      const actual = epMenuList.querySelector('.is-current');
+      if (actual) actual.scrollIntoView({ block: 'center' });
+    }
+    // También al cerrar: es lo que vuelve a armar el temporizador de ocultado,
+    // que mientras el panel estaba abierto no llegaba a saltar.
+    showUI();
   }
 
   function syncAudioSelect(playback) {
@@ -340,11 +398,15 @@ const Player = (() => {
     teardownSource();
 
     titleEl.textContent = `${seriesTitle} — E${ep.EpisodeNumber}: ${ep.Title}`;
-    epQuickSelect.value = String(index);
+    syncEpSelection();
+    toggleEpMenu(false);
     skipIntroBtn.hidden = true;
     nextEpBtn.hidden = true;
     btnPrev.disabled = index === 0;
-    btnNext.disabled = index === playlist.length - 1;
+    btnNext.disabled = !hasNext();
+    // En una película no hay siguiente nunca: el botón sobra, no se desactiva.
+    btnNextCenter.hidden = playlist.length < 2;
+    btnNextCenter.disabled = !hasNext();
     autoSkippedIntro = false;
     lastProgressSentAt = 0;
     ep.__activeProvider = providerOf(ep);
@@ -589,7 +651,18 @@ const Player = (() => {
   video.addEventListener('click', () => { if (esMovil()) showUI(); else togglePlay(); });
   btnNext.addEventListener('click', next);
   btnPrev.addEventListener('click', prev);
-  epQuickSelect.addEventListener('change', (e) => goTo(Number(e.target.value)));
+  btnNextCenter.addEventListener('click', () => { next(); showUI(); });
+
+  btnEpisodes.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleEpMenu();
+  });
+  // Un clic dentro del panel no debe cerrarlo (ni sacar/ocultar los controles).
+  epMenu.addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('click', (e) => {
+    if (!epMenu.hidden && !epMenuWrap.contains(e.target)) toggleEpMenu(false);
+  });
+
   audioTrackSelect.addEventListener('change', (e) => {
     preferredAudio = e.target.value || '';
     localStorage.setItem(audioPrefKey(), preferredAudio);
@@ -647,6 +720,10 @@ const Player = (() => {
 
   btnSettings.addEventListener('click', (e) => {
     e.stopPropagation();
+    // El clic no se propaga, así que el cierre por clic fuera no llega a correr:
+    // sin esto, abrir opciones con la lista abierta dejaba un panel encima del
+    // otro.
+    toggleEpMenu(false);
     settingsPanel.hidden = !settingsPanel.hidden;
   });
   document.addEventListener('click', (e) => {
@@ -659,7 +736,11 @@ const Player = (() => {
   function showUI() {
     stage.classList.remove('hide-ui');
     clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => { if (!video.paused) stage.classList.add('hide-ui'); }, 3000);
+    hideTimer = setTimeout(() => {
+      // Con un panel abierto no se oculta nada: la barra se lleva por delante la
+      // lista de capítulos que estabas leyendo, y son tres segundos.
+      if (!video.paused && epMenu.hidden && settingsPanel.hidden) stage.classList.add('hide-ui');
+    }, 3000);
   }
   stage.addEventListener('mousemove', showUI);
   stage.addEventListener('touchstart', showUI);
@@ -676,7 +757,13 @@ const Player = (() => {
       case 'f': btnFs.click(); break;
       case 'n': next(); break;
       case 'p': prev(); break;
-      case 'Escape': if (!document.fullscreenElement) close(); break;
+      // Con un panel abierto, Esc cierra el panel: cerrar el reproductor entero
+      // por querer salir de la lista de capítulos es perder dónde ibas.
+      case 'Escape':
+        if (!epMenu.hidden) { toggleEpMenu(false); break; }
+        if (!settingsPanel.hidden) { settingsPanel.hidden = true; break; }
+        if (!document.fullscreenElement) close();
+        break;
     }
     showUI();
   });
