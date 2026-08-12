@@ -1144,9 +1144,21 @@ async function findEpisodeSnapshot(pool, episode) {
 
   try {
     if (sourceRef.toLowerCase().startsWith('jkanime:')) {
+      // El slug vive en la serie, pero cada temporada de una franquicia es una
+      // ficha distinta del sitio de origen, con su propio slug y su numeración
+      // empezando de nuevo en 1. Buscar solo por slug de la serie + número hacía
+      // que, por ejemplo, el capítulo 2 de cualquier temporada de Bleach cayera
+      // en el snapshot del capítulo 2 de la serie original: las cinco
+      // temporadas resolvían al mismo vídeo.
+      //
+      // El título sí distingue ("Bleach 2" frente a "Bleach: Sennen Kessen-hen -
+      // Soukoku-tan 2") y es un enlace exacto, no una heurística: el importador
+      // escribe el mismo valor en Episodes.Title y en EpisodeTitle. El slug
+      // queda de respaldo para lo importado antes o con el título retocado.
       const jkResult = await pool.request()
         .input('slug', sql.NVarChar(255), normalizedSlug)
         .input('episodeNumber', sql.Int, episode.EpisodeNumber)
+        .input('episodeTitle', sql.NVarChar(500), episode.Title || null)
         .query(`
           SELECT TOP 1
             EpisodePageUrl,
@@ -1162,9 +1174,12 @@ async function findEpisodeSnapshot(pool, episode) {
             PlayerEmbedsJson,
             NULL AS PlayerOptionsJson
           FROM dbo.JkAnimeEpisodeSnapshots
-          WHERE SeriesSlug = @slug
-            AND EpisodeNumber = @episodeNumber
-          ORDER BY UpdatedAt DESC, Id DESC
+          WHERE EpisodeNumber = @episodeNumber
+            AND (EpisodeTitle = @episodeTitle OR SeriesSlug = @slug)
+          ORDER BY
+            CASE WHEN EpisodeTitle = @episodeTitle THEN 0 ELSE 1 END,
+            UpdatedAt DESC,
+            Id DESC
         `);
       snapshots.push(...jkResult.recordset);
 
@@ -1246,6 +1261,7 @@ router.get('/episodes/:id/playback', async (req, res) => {
           e.VideoUrl,
           e.Provider,
           e.EpisodeNumber,
+          e.Title,
           se.SeasonNumber,
           sr.SourceRef
         FROM dbo.Episodes e
@@ -1468,6 +1484,7 @@ router.get('/episodes/:id/stream', async (req, res) => {
           e.VideoUrl,
           e.Provider,
           e.EpisodeNumber,
+          e.Title,
           se.SeasonNumber,
           sr.SourceRef
         FROM dbo.Episodes e
