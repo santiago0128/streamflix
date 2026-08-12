@@ -45,6 +45,25 @@ Comprobar:
 curl localhost:3000/api/health     # {"status":"ok","db":"connected"}
 ```
 
+## 2.1 Temporadas de franquicias de anime (una vez)
+
+En jkanime cada temporada de una franquicia es una ficha aparte, con su propio
+slug y su numeración empezando otra vez en 1. Ese slug se guarda ahora en
+`dbo.Seasons.SourceRef`; sin él, el capítulo 2 de cualquier temporada de Bleach
+se resolvía contra el capítulo 2 de la serie original.
+
+Para lo ya importado, el campo se rellena a partir de los snapshots que ya están
+en la base, sin reimportar nada. El script crea la columna si falta, así que
+basta con:
+
+```bash
+docker compose -f docker-compose.prod.yml exec app node server/db/backfill-season-sourceref.js --dry-run
+docker compose -f docker-compose.prod.yml exec app node server/db/backfill-season-sourceref.js
+```
+
+Es idempotente: se puede repetir. Las temporadas que avise como «sin origen» son
+las que no tienen snapshots en la base y sí hay que volver a importar.
+
 ## 3. Importador
 
 El bot no es un servicio: se ejecuta a demanda. Necesita Node en el host y

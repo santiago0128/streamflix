@@ -9,7 +9,8 @@
     "db:init": "node server/db/init.js",
     "db:anime": "node server/db/import-anime.js",
     "db:verify": "node server/db/verify-content.js",
-    "db:backdrops": "node server/db/generate-backdrops.js"
+    "db:backdrops": "node server/db/generate-backdrops.js",
+    "db:seasons": "node server/db/backfill-season-sourceref.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

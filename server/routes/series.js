@@ -1142,21 +1142,33 @@ async function findEpisodeSnapshot(pool, episode) {
   const normalizedSlug = normalizeSourceRef(sourceRef);
   const snapshots = [];
 
+  // Solo se aprovecha la referencia de la temporada si es del mismo sitio que
+  // se va a consultar: la escribe el importador de jkanime, y colarla en la
+  // consulta de PelisPlus emparejaría slugs de catálogos distintos.
+  const seasonRef = String(episode.SeasonSourceRef || '');
+  const seasonSlug = seasonRef.toLowerCase().startsWith('jkanime:')
+    ? normalizeSourceRef(seasonRef)
+    : null;
+
   try {
     if (sourceRef.toLowerCase().startsWith('jkanime:')) {
-      // El slug vive en la serie, pero cada temporada de una franquicia es una
-      // ficha distinta del sitio de origen, con su propio slug y su numeración
-      // empezando de nuevo en 1. Buscar solo por slug de la serie + número hacía
-      // que, por ejemplo, el capítulo 2 de cualquier temporada de Bleach cayera
-      // en el snapshot del capítulo 2 de la serie original: las cinco
+      // En una franquicia de anime cada temporada es una ficha distinta del
+      // sitio de origen, con su propio slug y su numeración empezando otra vez
+      // en 1. El slug de la serie no basta para saber de dónde salió un
+      // capítulo: buscando solo por él, el capítulo 2 de cualquier temporada de
+      // Bleach caía en el del capítulo 2 de la serie original, y las cinco
       // temporadas resolvían al mismo vídeo.
       //
-      // El título sí distingue ("Bleach 2" frente a "Bleach: Sennen Kessen-hen -
-      // Soukoku-tan 2") y es un enlace exacto, no una heurística: el importador
-      // escribe el mismo valor en Episodes.Title y en EpisodeTitle. El slug
-      // queda de respaldo para lo importado antes o con el título retocado.
+      // Se busca por tres vías, en este orden:
+      //   1. El slug de la temporada (Seasons.SourceRef). Es el enlace bueno.
+      //   2. El título del episodio, que también distingue ("Bleach 2" frente a
+      //      "Bleach: Sennen Kessen-hen - Soukoku-tan 2") y es exacto: el
+      //      importador escribe el mismo valor en Episodes.Title y EpisodeTitle.
+      //      Cubre lo importado antes de que existiera la columna.
+      //   3. El slug de la serie, el comportamiento de siempre, como respaldo.
       const jkResult = await pool.request()
         .input('slug', sql.NVarChar(255), normalizedSlug)
+        .input('seasonSlug', sql.NVarChar(255), seasonSlug)
         .input('episodeNumber', sql.Int, episode.EpisodeNumber)
         .input('episodeTitle', sql.NVarChar(500), episode.Title || null)
         .query(`
@@ -1175,9 +1187,13 @@ async function findEpisodeSnapshot(pool, episode) {
             NULL AS PlayerOptionsJson
           FROM dbo.JkAnimeEpisodeSnapshots
           WHERE EpisodeNumber = @episodeNumber
-            AND (EpisodeTitle = @episodeTitle OR SeriesSlug = @slug)
+            AND (SeriesSlug = @seasonSlug
+                 OR EpisodeTitle = @episodeTitle
+                 OR SeriesSlug = @slug)
           ORDER BY
-            CASE WHEN EpisodeTitle = @episodeTitle THEN 0 ELSE 1 END,
+            CASE WHEN SeriesSlug   = @seasonSlug   THEN 0
+                 WHEN EpisodeTitle = @episodeTitle THEN 1
+                 ELSE 2 END,
             UpdatedAt DESC,
             Id DESC
         `);
@@ -1263,6 +1279,7 @@ router.get('/episodes/:id/playback', async (req, res) => {
           e.EpisodeNumber,
           e.Title,
           se.SeasonNumber,
+          se.SourceRef AS SeasonSourceRef,
           sr.SourceRef
         FROM dbo.Episodes e
         JOIN dbo.Seasons se ON se.Id = e.SeasonId
@@ -1486,6 +1503,7 @@ router.get('/episodes/:id/stream', async (req, res) => {
           e.EpisodeNumber,
           e.Title,
           se.SeasonNumber,
+          se.SourceRef AS SeasonSourceRef,
           sr.SourceRef
         FROM dbo.Episodes e
         JOIN dbo.Seasons se ON se.Id = e.SeasonId

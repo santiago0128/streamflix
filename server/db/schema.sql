@@ -57,9 +57,58 @@ CREATE TABLE dbo.SeriesGenres (
     CONSTRAINT FK_SeriesGenres_Genres FOREIGN KEY (GenreId)  REFERENCES dbo.Genres(Id) ON DELETE CASCADE
 );
 
+-- Temporadas
+IF OBJECT_ID('dbo.Seasons', 'U') IS NULL
+CREATE TABLE dbo.Seasons (
+    Id           INT IDENTITY(1,1) PRIMARY KEY,
+    SeriesId     INT NOT NULL,
+    SeasonNumber INT NOT NULL,
+    Title        NVARCHAR(200) NULL,
+    CONSTRAINT FK_Seasons_Series FOREIGN KEY (SeriesId) REFERENCES dbo.Series(Id) ON DELETE CASCADE,
+    CONSTRAINT UQ_Seasons UNIQUE (SeriesId, SeasonNumber)
+);
+
+-- Referencia al catálogo de origen, por temporada (ej. 'jkanime:bleach-sennen-
+-- kessen-hen-soukoku-tan'). En las franquicias de anime cada temporada es una
+-- ficha distinta del sitio de origen, con su propio slug y su numeración
+-- empezando otra vez en 1, así que el SourceRef de la serie no basta para saber
+-- de dónde salió un capítulo: sin esto, el capítulo 2 de cualquier temporada de
+-- Bleach se resolvía contra el capítulo 2 de la serie original.
+-- Nulo para lo importado antes de que existiera la columna y para las series
+-- convencionales, donde la temporada ya se distingue por SeasonNumber.
+IF COL_LENGTH('dbo.Seasons', 'SourceRef') IS NULL
+    ALTER TABLE dbo.Seasons ADD SourceRef NVARCHAR(100) NULL;
+
+-- Episodios  (aquí viven los links de reproducción + marcas de intro/outro)
+IF OBJECT_ID('dbo.Episodes', 'U') IS NULL
+CREATE TABLE dbo.Episodes (
+    Id            INT IDENTITY(1,1) PRIMARY KEY,
+    SeasonId      INT NOT NULL,
+    EpisodeNumber INT NOT NULL,
+    Title         NVARCHAR(200) NOT NULL,
+    Description   NVARCHAR(MAX) NULL,
+    VideoUrl      NVARCHAR(1000) NOT NULL,   -- link de reproducción del video
+    ThumbnailUrl  NVARCHAR(500) NULL,
+    DurationSec   INT NULL,
+    IntroStartSec INT NULL,                  -- inicio de la intro (para el botón "saltar intro")
+    IntroEndSec   INT NULL,                  -- fin de la intro
+    OutroStartSec INT NULL,                  -- inicio de los créditos (para "siguiente episodio")
+    CONSTRAINT FK_Episodes_Seasons FOREIGN KEY (SeasonId) REFERENCES dbo.Seasons(Id) ON DELETE CASCADE,
+    CONSTRAINT UQ_Episodes UNIQUE (SeasonId, EpisodeNumber)
+);
+
+-- Cómo debe reproducirse cada episodio:
+--   'file'  = archivo progresivo (MP4/WebM) directo en VideoUrl
+--   'hls'   = playlist HLS (.m3u8), se reproduce con hls.js
+--   'embed' = reproductor de terceros incrustado en un <iframe>
+IF COL_LENGTH('dbo.Episodes', 'Provider') IS NULL
+    ALTER TABLE dbo.Episodes ADD Provider NVARCHAR(20) NOT NULL
+        CONSTRAINT DF_Episodes_Provider DEFAULT 'file';
+
 -- Relleno de ContentType para filas anteriores a que existiera la columna.
--- Va después de crear SeriesGenres: el UPDATE la consulta, y en una base nueva
--- todavía no existía, así que la instalación limpia fallaba aquí.
+-- Va aquí, al final, porque el UPDATE consulta Seasons y Episodes: puesto más
+-- arriba, una instalación limpia moría con "Invalid object name 'dbo.Seasons'"
+-- al no existir todavía. El EXEC difiere la compilación, pero no la ejecución.
 EXEC(N'
 UPDATE s
    SET ContentType = CASE
@@ -90,43 +139,6 @@ UPDATE s
     OR s.ContentType = ''''
     OR s.ContentType NOT IN (''anime'', ''series'', ''movie'');
 ');
-
--- Temporadas
-IF OBJECT_ID('dbo.Seasons', 'U') IS NULL
-CREATE TABLE dbo.Seasons (
-    Id           INT IDENTITY(1,1) PRIMARY KEY,
-    SeriesId     INT NOT NULL,
-    SeasonNumber INT NOT NULL,
-    Title        NVARCHAR(200) NULL,
-    CONSTRAINT FK_Seasons_Series FOREIGN KEY (SeriesId) REFERENCES dbo.Series(Id) ON DELETE CASCADE,
-    CONSTRAINT UQ_Seasons UNIQUE (SeriesId, SeasonNumber)
-);
-
--- Episodios  (aquí viven los links de reproducción + marcas de intro/outro)
-IF OBJECT_ID('dbo.Episodes', 'U') IS NULL
-CREATE TABLE dbo.Episodes (
-    Id            INT IDENTITY(1,1) PRIMARY KEY,
-    SeasonId      INT NOT NULL,
-    EpisodeNumber INT NOT NULL,
-    Title         NVARCHAR(200) NOT NULL,
-    Description   NVARCHAR(MAX) NULL,
-    VideoUrl      NVARCHAR(1000) NOT NULL,   -- link de reproducción del video
-    ThumbnailUrl  NVARCHAR(500) NULL,
-    DurationSec   INT NULL,
-    IntroStartSec INT NULL,                  -- inicio de la intro (para el botón "saltar intro")
-    IntroEndSec   INT NULL,                  -- fin de la intro
-    OutroStartSec INT NULL,                  -- inicio de los créditos (para "siguiente episodio")
-    CONSTRAINT FK_Episodes_Seasons FOREIGN KEY (SeasonId) REFERENCES dbo.Seasons(Id) ON DELETE CASCADE,
-    CONSTRAINT UQ_Episodes UNIQUE (SeasonId, EpisodeNumber)
-);
-
--- Cómo debe reproducirse cada episodio:
---   'file'  = archivo progresivo (MP4/WebM) directo en VideoUrl
---   'hls'   = playlist HLS (.m3u8), se reproduce con hls.js
---   'embed' = reproductor de terceros incrustado en un <iframe>
-IF COL_LENGTH('dbo.Episodes', 'Provider') IS NULL
-    ALTER TABLE dbo.Episodes ADD Provider NVARCHAR(20) NOT NULL
-        CONSTRAINT DF_Episodes_Provider DEFAULT 'file';
 
 -- Mi Lista (watchlist por usuario)
 IF OBJECT_ID('dbo.Watchlist', 'U') IS NULL
