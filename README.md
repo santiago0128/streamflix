@@ -69,30 +69,44 @@ si no se indica ninguna, el script se niega a correr.
 `media/` está en `.gitignore` y Express la sirve con soporte de *range requests*,
 así que el seek del reproductor funciona con archivos locales.
 
-## Portadas de películas
+## Portadas
 
-Las portadas de las películas venían de las páginas de origen: miniaturas de
-10-18 KB, borrosas en la ficha grande y colgando de dominios que cambian de
-número cada pocos meses. `npm run db:posters` las sustituye por las de TMDB
-(`image.tmdb.org`, ~80 KB), que es el mismo CDN que ya usaba alguna ficha suelta.
+Las portadas venían de la página de la que se importó cada título (cuevana3,
+pelisplushd, jkdesa, henaojara): miniaturas de 10-18 KB, borrosas en la ficha
+grande y colgando de dominios que cambian de número cada pocos meses.
+`npm run db:posters` las sustituye por las del catálogo que corresponda —
+**AniList para el anime, TMDB para películas y series**.
 
 ```bash
-npm run db:posters                    # simulación: enseña qué cambiaría
+npm run db:posters                    # simulación de los tres tipos
 npm run db:posters -- --apply         # escribe la base
+npm run db:posters -- --type=anime    # solo un tipo (movie, series, anime)
 npm run db:posters -- --ids=4,6       # solo esas fichas
-npm run db:posters -- --type=series   # otro tipo de contenido
 npm run db:posters -- --force         # rehace también las ya migradas
 ```
 
-Guarda la URL, no la imagen: no descarga ni re-aloja nada. No necesita
-`TMDB_API_KEY` —la portada sale de la web pública— y es idempotente: sin
-`--force` salta lo que ya apunta a TMDB.
+El anime va primero a AniList porque guarda el título en romaji, en inglés y en
+japonés, que es por donde vienen los títulos del catálogo («Shingeki no Kyojin
+Temporada 1»), y su carátula es la oficial del anime en vez del cartel de una
+edición concreta. Si allí no aparece, se prueba TMDB.
 
-Antes de escribir comprueba que la portada responde, y marca con `⚠` las fichas
-cuyo año no cuadra con el de TMDB: puede ser un año mal puesto en la base o una
-película distinta con el mismo título, y conviene mirarlas a mano. Cuando no
-encuentra una ficha que case con seguridad, deja la portada que hubiera: una
+Guarda la URL, no la imagen: no descarga ni re-aloja nada. Ninguno de los dos
+orígenes necesita clave. Es idempotente: sin `--force` salta lo que ya está en un
+CDN bueno (TMDB, AniList, Kitsu), así que no toca el anime importado de Kitsu,
+que ya trae su carátula.
+
+Antes de escribir comprueba que la imagen responde. Y **no escribe nada que no
+case con seguridad**: si el título no aparece, deja la portada que hubiera; una
 equivocada es peor que una borrosa, porque nadie la revisa después.
+
+Por eso omite también las fichas cuyo año no cuadra, que casi siempre son otra
+cosa con el mismo nombre: «El juego del calamar» casa con *Squid Game: The
+Challenge* (el concurso derivado), y «Bleach (2024)» —que es el *Sennen
+Kessen-hen*— casa con el BLEACH original de 2004, cuya carátula no es la de esa
+temporada. Las lista al final con el enlace a la ficha para revisarlas:
+
+- si el año de la base está mal, corrígelo y repite con `--ids=<id>`;
+- si la ficha es la correcta, repite con `--con-desfase-de-año`.
 
 ## Verificar el contenido
 
@@ -134,8 +148,9 @@ streamflix/
 │  │  ├─ seed.sql          # datos de ejemplo (videos reales)
 │  │  ├─ init.js           # crea BD + aplica schema + seed
 │  │  ├─ import-anime.js   # importador de anime desde la API de Kitsu
-│  │  ├─ tmdb.js           # búsqueda de fichas en TMDB (portadas y banners)
-│  │  ├─ update-movie-posters.js # portadas de películas desde TMDB
+│  │  ├─ tmdb.js           # búsqueda de fichas en TMDB (cine y series)
+│  │  ├─ anilist.js        # búsqueda de fichas en AniList (anime)
+│  │  ├─ update-posters.js # portadas del catálogo desde AniList/TMDB
 │  │  └─ verify-content.js # verifica que lo guardado sea la serie correcta
 │  ├─ middleware/auth.js   # verificación de JWT
 │  └─ routes/

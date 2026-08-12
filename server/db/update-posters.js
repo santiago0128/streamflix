@@ -1,45 +1,61 @@
 #!/usr/bin/env node
 
 /**
- * Reemplaza las portadas de las películas por las de TMDB.
+ * Reemplaza las portadas del catálogo por las del origen que corresponda:
+ * AniList para el anime, TMDB para películas y series.
  *
- * Las portadas del catálogo venían de las páginas de origen (cuevana3,
- * pelisplushd): miniaturas de 10-18 KB que se ven borrosas en la ficha grande,
- * y alojadas en dominios que cambian de número cada pocos meses — el día que
- * ww9 pase a ww10, todas las portadas se caen a la vez.
+ * Las portadas venían de las páginas de las que se importó cada título
+ * (cuevana3, pelisplushd, jkdesa, henaojara): miniaturas de 10-18 KB que se ven
+ * borrosas en la ficha grande, y alojadas en dominios que cambian de número
+ * cada pocos meses — el día que ww9 pase a ww10 se caen todas a la vez.
  *
- * TMDB sirve la misma portada a 500 px (~80 KB) desde image.tmdb.org, que es un
- * CDN estable y el mismo origen que ya usaba alguna ficha suelta del catálogo.
+ * El anime va primero a AniList porque guarda el título en romaji, en inglés y
+ * en japonés, que es por donde vienen los títulos del catálogo, y su carátula es
+ * la oficial del anime; si allí no aparece, se prueba TMDB.
+ *
  * Se guarda la URL, no la imagen: no se descarga ni se re-aloja nada.
  *
- *   node server/db/update-movie-posters.js                 # simulación
- *   node server/db/update-movie-posters.js --apply         # escribe la base
- *   node server/db/update-movie-posters.js --ids=4,6,11    # solo esas fichas
- *   node server/db/update-movie-posters.js --force         # también las ya migradas
- *   node server/db/update-movie-posters.js --type=series   # otro tipo de contenido
+ *   node server/db/update-posters.js                  # simulación, los tres tipos
+ *   node server/db/update-posters.js --apply          # escribe la base
+ *   node server/db/update-posters.js --type=anime     # solo un tipo
+ *   node server/db/update-posters.js --ids=4,6,11     # solo esas fichas
+ *   node server/db/update-posters.js --force          # también las ya migradas
  *
- * Es idempotente: sin --force salta lo que ya apunta a TMDB, así que se puede
- * repetir sin volver a pedir nada.
+ * Es idempotente: sin --force salta lo que ya está en un CDN bueno, así que se
+ * puede repetir sin volver a pedir nada.
  */
 
 require('dotenv').config();
 const https = require('https');
 const { sql, getPool } = require('../db');
 const { TMDB_BASE_URL, findTmdbMatch, requestText } = require('./tmdb');
+const { fetchAnimeArtwork } = require('./anilist');
 
 // 500 px de ancho: la ficha de detalle es la que más la agranda y ahí ya se ve
 // nítida, sin irse a los 200 KB de w780 en una parrilla de decenas de portadas.
 const POSTER_CDN = 'https://image.tmdb.org/t/p/w500';
-const POSTER_HOSTS = /^(image|media)\.tmdb\.org$/;
+
+// Orígenes que ya sirven una portada buena y estable. Lo que esté aquí no se
+// toca sin --force: el anime importado de Kitsu, por ejemplo, ya trae la suya, y
+// cambiarla por otra no la mejora.
+const CDN_BUENOS = /(^|\.)(tmdb\.org|kitsu\.io|kitsu\.app|anilist\.co|anili\.st)$/;
+
+const TIPOS = ['movie', 'series', 'anime'];
 
 function parseArgs(argv) {
-  const args = { apply: false, force: false, ids: null, type: 'movie' };
+  const args = { apply: false, force: false, ids: null, types: TIPOS, conDesfase: false };
 
   for (const token of argv) {
     if (token === '--apply') args.apply = true;
     else if (token === '--force') args.force = true;
-    else if (token.startsWith('--type=')) args.type = token.slice('--type='.length).trim();
-    else if (token.startsWith('--ids=')) {
+    else if (token === '--con-desfase-de-año' || token === '--con-desfase-de-ano') args.conDesfase = true;
+    else if (token.startsWith('--type=')) {
+      args.types = token
+        .slice('--type='.length)
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+    } else if (token.startsWith('--ids=')) {
       args.ids = token
         .slice('--ids='.length)
         .split(',')
@@ -51,9 +67,9 @@ function parseArgs(argv) {
   return args;
 }
 
-function isTmdbPoster(url) {
+function yaEsBuena(url) {
   try {
-    return POSTER_HOSTS.test(new URL(String(url)).hostname);
+    return CDN_BUENOS.test(new URL(String(url)).hostname);
   } catch {
     return false;
   }
@@ -104,12 +120,13 @@ function checkImage(url) {
   });
 }
 
-async function resolvePoster(series) {
+/** Portada de TMDB, para películas y series (y como respaldo del anime). */
+async function resolveFromTmdb(series) {
   let match;
   try {
     match = await findTmdbMatch(series);
   } catch (error) {
-    return { ok: false, reason: `TMDB no respondió a la búsqueda: ${error.message || error}` };
+    return { ok: false, reason: `TMDB no respondió a la búsqueda: ${error.message || error}`, fallo: true };
   }
   if (!match) return { ok: false, reason: 'sin ficha en TMDB que case con el título y el año' };
 
@@ -117,22 +134,70 @@ async function resolvePoster(series) {
   try {
     detailHtml = await requestText(`${TMDB_BASE_URL}${match.path}`);
   } catch (error) {
-    return { ok: false, reason: `no se pudo leer la ficha: ${error.message || error}` };
+    return { ok: false, reason: `no se pudo leer la ficha: ${error.message || error}`, fallo: true };
   }
 
   const file = extractPosterFile(detailHtml);
   if (!file) return { ok: false, reason: 'la ficha de TMDB no tiene portada' };
 
-  const url = `${POSTER_CDN}${file}`;
-  const image = await checkImage(url);
-  if (!image.ok) return { ok: false, reason: `la portada no responde (HTTP ${image.status || 'sin respuesta'})` };
+  return {
+    ok: true,
+    url: `${POSTER_CDN}${file}`,
+    origen: 'TMDB',
+    match: { ...match, url: `${TMDB_BASE_URL}${match.path}` }
+  };
+}
 
-  // Un año que no cuadra no basta para descartar la ficha —hay estrenos que la
-  // base fecha por el año de importación— pero sí para no darla por buena en
-  // silencio: se marca y se repite al final para que alguien la mire.
-  const dudosa = Boolean(series.ReleaseYear && match.year && Math.abs(series.ReleaseYear - match.year) > 1);
+/** Carátula de AniList, para anime. */
+async function resolveFromAnilist(series) {
+  let artwork;
+  try {
+    artwork = await fetchAnimeArtwork(series);
+  } catch (error) {
+    return { ok: false, reason: `AniList no respondió: ${error.message || error}`, fallo: true };
+  }
+  if (!artwork?.posterUrl) return { ok: false, reason: 'sin ficha en AniList que case con el título' };
 
-  return { ok: true, url, bytes: image.bytes, match, dudosa };
+  return {
+    ok: true,
+    url: artwork.posterUrl,
+    origen: 'AniList',
+    match: { title: artwork.title, year: artwork.year, url: artwork.siteUrl }
+  };
+}
+
+async function resolvePoster(series) {
+  // El anime va primero a AniList; si allí no está, se prueba TMDB, que también
+  // tiene anime aunque con los títulos en español.
+  const intentos = series.ContentType === 'anime'
+    ? [resolveFromAnilist, resolveFromTmdb]
+    : [resolveFromTmdb];
+
+  let elegido = null;
+  const motivos = [];
+  for (const intento of intentos) {
+    const resultado = await intento(series);
+    if (resultado.ok) { elegido = resultado; break; }
+    motivos.push(resultado.reason);
+  }
+  // Con dos orígenes, quedarse con el motivo del último engaña: en el anime se
+  // leía "sin ficha en TMDB" sin mencionar que AniList tampoco la tenía.
+  if (!elegido) return { ok: false, reason: motivos.join('; ') };
+
+  const image = await checkImage(elegido.url);
+  if (!image.ok) {
+    return { ok: false, reason: `la portada de ${elegido.origen} no responde (HTTP ${image.status || 'sin respuesta'})` };
+  }
+
+  // Un año que no cuadra suele ser una ficha distinta con el mismo nombre: la
+  // fila "Bleach (2024)" es el Sennen Kessen-hen, y buscar "Bleach" devuelve el
+  // original de 2004, cuya carátula no es la de esa temporada. No se escribe sin
+  // que alguien lo mire; --con-desfase-de-año lo fuerza.
+  const desfase = series.ReleaseYear && elegido.match.year
+    ? Math.abs(series.ReleaseYear - elegido.match.year)
+    : 0;
+
+  return { ...elegido, bytes: image.bytes, desfase };
 }
 
 const kb = (bytes) => (bytes ? `${Math.round(bytes / 1024)} KB` : '?');
@@ -142,26 +207,34 @@ async function main() {
   const pool = await getPool();
 
   try {
-    const request = pool.request().input('type', sql.NVarChar(20), args.type);
+    const desconocidos = args.types.filter((type) => !TIPOS.includes(type));
+    if (desconocidos.length) {
+      throw new Error(`tipo de contenido desconocido: ${desconocidos.join(', ')}. Válidos: ${TIPOS.join(', ')}`);
+    }
+
+    const request = pool.request();
+    args.types.forEach((type, i) => request.input(`t${i}`, sql.NVarChar(20), type));
+    const typeFilter = args.types.map((_, i) => `@t${i}`).join(', ');
     const idsFilter = args.ids?.length ? `AND Id IN (${args.ids.join(',')})` : '';
     const result = await request.query(`
       SELECT Id, Title, ContentType, ReleaseYear, PosterUrl
       FROM dbo.Series
-      WHERE ContentType = @type ${idsFilter}
-      ORDER BY Id
+      WHERE ContentType IN (${typeFilter}) ${idsFilter}
+      ORDER BY ContentType, Id
     `);
 
-    const rows = result.recordset.filter((series) => args.force || !isTmdbPoster(series.PosterUrl));
+    const rows = result.recordset.filter((series) => args.force || !yaEsBuena(series.PosterUrl));
     const yaMigradas = result.recordset.length - rows.length;
+    const etiquetaTipos = args.types.join(', ');
 
     if (!rows.length) {
-      console.log(`No hay portadas pendientes (${result.recordset.length} ficha(s) de tipo '${args.type}', todas ya en TMDB).`);
+      console.log(`No hay portadas pendientes (${result.recordset.length} ficha(s) de tipo '${etiquetaTipos}', todas ya en un CDN bueno).`);
       return;
     }
 
     console.log(
-      `${rows.length} portada(s) a resolver de tipo '${args.type}'` +
-      `${yaMigradas ? ` (${yaMigradas} ya estaban en TMDB, se saltan)` : ''}\n`
+      `${rows.length} portada(s) a resolver de tipo '${etiquetaTipos}'` +
+      `${yaMigradas ? ` (${yaMigradas} ya estaban en un CDN bueno, se saltan)` : ''}\n`
     );
 
     const fallidas = [];
@@ -177,7 +250,14 @@ async function main() {
         continue;
       }
 
-      if (outcome.dudosa) dudosas.push({ series, match: outcome.match });
+      if (outcome.desfase > 1 && !args.conDesfase) {
+        dudosas.push({ series, match: outcome.match, url: outcome.url });
+        console.log(
+          `⚠ [${series.ContentType}] #${series.Id} ${series.Title} (${series.ReleaseYear}) — ` +
+          `omitida: casa con ${outcome.match.title} (${outcome.match.year}), ${outcome.desfase} años de desfase`
+        );
+        continue;
+      }
 
       if (args.apply) {
         await pool
@@ -189,8 +269,8 @@ async function main() {
 
       actualizadas += 1;
       console.log(
-        `${outcome.dudosa ? '⚠ ' : ''}#${series.Id} ${series.Title} (${series.ReleaseYear || 's/f'}) → ` +
-        `${outcome.match.title}${outcome.match.year ? ` (${outcome.match.year})` : ''}`
+        `[${series.ContentType}] #${series.Id} ${series.Title} (${series.ReleaseYear || 's/f'}) → ` +
+        `${outcome.match.title}${outcome.match.year ? ` (${outcome.match.year})` : ''} · ${outcome.origen}`
       );
       console.log(`      antes: ${series.PosterUrl || '(sin portada)'}`);
       console.log(`      ahora: ${outcome.url}  [${kb(outcome.bytes)}]`);
@@ -206,13 +286,16 @@ async function main() {
     }
 
     if (dudosas.length) {
-      console.log(`\n⚠ ${dudosas.length} ficha(s) con el año descuadrado. Puede ser un año mal puesto en`);
-      console.log('  la base o una película distinta con el mismo título: conviene mirarlas.');
-      for (const { series, match } of dudosas) {
+      console.log(`\n⚠ ${dudosas.length} ficha(s) omitida(s) por desfase de año. Puede ser un año mal`);
+      console.log('  puesto en la base, o una ficha distinta con el mismo nombre — el caso típico es');
+      console.log('  una temporada de una franquicia, cuya carátula no es la de la serie original.');
+      for (const { series, match, url } of dudosas) {
         console.log(`  #${series.Id} ${series.Title} (${series.ReleaseYear}) → ${match.title} (${match.year})`);
-        console.log(`      ficha: ${TMDB_BASE_URL}${match.path}`);
+        if (match.url) console.log(`      ficha:   ${match.url}`);
+        console.log(`      portada: ${url}`);
       }
-      console.log('  Para corregir una: --ids=<id> tras arreglar el año, o edita PosterUrl a mano.');
+      console.log('\n  Si el año de la base está mal, corrígelo y repite con --ids=<id>.');
+      console.log('  Si la ficha es la correcta, repite con --con-desfase-de-año.');
     }
 
     if (!args.apply) console.log('\n(simulación: no se escribió nada. Repite con --apply)');

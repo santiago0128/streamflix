@@ -101,6 +101,7 @@ function postJson(url, payload) {
 const CONSULTA = `
   query ($search: String) {
     Media(search: $search, type: ANIME) {
+      siteUrl
       bannerImage
       coverImage { extraLarge large }
       startDate { year }
@@ -155,7 +156,8 @@ async function fetchAnimeArtwork(series) {
     backdropUrl: media.bannerImage || media.coverImage?.extraLarge || media.coverImage?.large || null,
     posterUrl: media.coverImage?.extraLarge || media.coverImage?.large || null,
     title: media.title?.romaji || media.title?.english || media.title?.native || series.Title,
-    year: media.startDate?.year || null
+    year: media.startDate?.year || null,
+    siteUrl: media.siteUrl || null
   };
   artworkCache.set(cacheKey, artwork);
   return artwork;
