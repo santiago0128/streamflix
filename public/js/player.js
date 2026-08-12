@@ -220,9 +220,13 @@ const Player = (() => {
         // Pide el primer fragmento mientras todavía se está leyendo el manifiesto
         // en vez de esperar a terminarlo.
         startFragPrefetch: true,
-        // Con fragmentos tan largos, el buffer por defecto se traduce en pedir de
-        // más al arrancar; 30 s es un fragmento y medio, suficiente.
-        maxBufferLength: 30,
+        // Aquí había 30 s, que con fragmentos de 20 s es un fragmento y medio de
+        // colchón: en cuanto uno tardaba en llegar, el buffer se vaciaba y el
+        // vídeo se paraba. 90 s son cuatro fragmentos y medio, que aguantan un
+        // tropiezo del CDN sin que se note. El tope de memoria sigue siendo
+        // maxBufferSize (60 MB por defecto), así que esto no dispara el consumo
+        // en el móvil: lo que llegue antes manda.
+        maxBufferLength: 90,
         // Y no guardar lo ya visto, que en un móvil es memoria tirada.
         backBufferLength: 30,
         // Sin esto se puede elegir una calidad mayor que la propia pantalla.

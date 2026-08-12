@@ -13,19 +13,30 @@ const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/
 // una firma para que el endpoint no quede como proxy abierto a cualquier URL.
 const STREAM_PROXY_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 
-function signStreamUrl(url) {
-  return crypto.createHmac('sha256', STREAM_PROXY_SECRET).update(url).digest('hex').slice(0, 32);
+// El Referer entra en la firma porque viaja en la propia URL del sub-recurso:
+// si no se firmara, cualquiera podría cambiarlo a voluntad. Va ahí y no se
+// recalcula por petición para que los segmentos salgan con el mismo Referer que
+// el playlist del que cuelgan; recalcularlo daba a veces el de otro servidor (o
+// el de otro idioma), y hay CDN que responden 403 a eso.
+function signStreamUrl(url, referer = '') {
+  return crypto.createHmac('sha256', STREAM_PROXY_SECRET)
+    .update(`${url}\n${referer || ''}`)
+    .digest('hex')
+    .slice(0, 32);
 }
 
-function isValidStreamSignature(url, signature) {
-  const expected = Buffer.from(signStreamUrl(url));
+function isValidStreamSignature(url, referer, signature) {
+  const expected = Buffer.from(signStreamUrl(url, referer));
   const received = Buffer.from(String(signature || ''));
   return expected.length === received.length && crypto.timingSafeEqual(expected, received);
 }
 
-function buildSubResourceUrl(episodeId, absoluteUrl) {
-  const encoded = Buffer.from(absoluteUrl, 'utf8').toString('base64url');
-  return `/api/episodes/${episodeId}/stream?u=${encoded}&sig=${signStreamUrl(absoluteUrl)}`;
+function buildSubResourceUrl(episodeId, absoluteUrl, referer) {
+  const params = new URLSearchParams();
+  params.set('u', Buffer.from(absoluteUrl, 'utf8').toString('base64url'));
+  if (referer) params.set('r', Buffer.from(referer, 'utf8').toString('base64url'));
+  params.set('sig', signStreamUrl(absoluteUrl, referer));
+  return `/api/episodes/${episodeId}/stream?${params.toString()}`;
 }
 
 // La extensión de la URL no basta: un CDN que responde 403 con una página HTML
@@ -103,11 +114,50 @@ function guardarPlaylist(sourceUrl, body, contentType) {
   });
 }
 
+// Caché de la resolución de la fuente, que es con diferencia lo más caro del
+// reproductor: consultar snapshots, sondear cada candidato contra el CDN y, si
+// los enlaces guardados caducaron, rascar la página del embed con su
+// proof-of-work. Antes se rehacía en cada petición; ahora la ficha, /playback y
+// /stream comparten el mismo resultado. El TTL corto va acompasado con el de los
+// playlists: los enlaces llevan token y duran horas, no minutos.
+const RESOLUTION_TTL_MS = 5 * 60 * 1000;
+const RESOLUTION_CACHE_MAX = 200;
+const resolutionCache = new Map();
+
+const claveResolucion = (episodeId, audio) => `${episodeId}|${audio || ''}`;
+
+function leerResolucion(episodeId, audio) {
+  const clave = claveResolucion(episodeId, audio);
+  const hit = resolutionCache.get(clave);
+  if (!hit) return null;
+  if (Date.now() > hit.expiraEn) {
+    resolutionCache.delete(clave);
+    return null;
+  }
+  return hit.fuente;
+}
+
+function guardarResolucion(episodeId, audio, fuente) {
+  if (!fuente || !fuente.url) return fuente;
+  if (resolutionCache.size >= RESOLUTION_CACHE_MAX) {
+    resolutionCache.delete(resolutionCache.keys().next().value);
+  }
+  resolutionCache.set(claveResolucion(episodeId, audio), {
+    fuente,
+    expiraEn: Date.now() + RESOLUTION_TTL_MS
+  });
+  return fuente;
+}
+
+function olvidarResolucion(episodeId, audio) {
+  resolutionCache.delete(claveResolucion(episodeId, audio));
+}
+
 // Reescribe el playlist para que todo lo que cuelga de él vuelva por el proxy.
-function rewritePlaylist(body, baseUrl, episodeId) {
+function rewritePlaylist(body, baseUrl, episodeId, referer) {
   const toProxy = (rawUrl) => {
     try {
-      return buildSubResourceUrl(episodeId, new URL(rawUrl, baseUrl).toString());
+      return buildSubResourceUrl(episodeId, new URL(rawUrl, baseUrl).toString(), referer);
     } catch {
       return rawUrl;
     }
@@ -198,6 +248,15 @@ function requestUpstream(url, headers = {}, redirectCount = 0) {
         headers
       },
       (response) => {
+        // Las cabeceras ya llegaron: el tiempo de espera era para conectar, no
+        // para transmitir. Dejarlo activo durante el cuerpo cortaba el vídeo a
+        // media descarga: cuando el navegador llena su buffer deja de leer, la
+        // contrapresión llega hasta este socket, se queda quieto y a los 5 s se
+        // destruía la conexión. Quien manda a partir de aquí es el cliente, y de
+        // que se marche ya se encarga el `req.on('close')` de la ruta.
+        upstream.setTimeout(0);
+        if (upstream.socket) upstream.socket.setTimeout(0);
+
         if (response.statusCode && isRedirectStatus(response.statusCode) && response.headers.location) {
           const redirectedUrl = new URL(response.headers.location, url).toString();
           response.resume();
@@ -214,6 +273,16 @@ function requestUpstream(url, headers = {}, redirectCount = 0) {
       upstream.destroy(new Error(`Timeout consultando ${url}`));
     });
     upstream.end();
+  });
+}
+
+/** Lee una respuesta entera en memoria. Solo para playlists y segmentos. */
+function leerCuerpo(response) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    response.on('data', (chunk) => chunks.push(chunk));
+    response.on('error', reject);
+    response.on('end', () => resolve(Buffer.concat(chunks)));
   });
 }
 
@@ -456,7 +525,35 @@ function extractPlayerMediaUrls(html, pageUrl) {
     });
 }
 
-function extractEmbed69Links(html, pageUrl) {
+const POW_MAX_NONCE = 2_000_000;
+// Ceder el turno cada pocos miles de intentos cuesta un ~1 % del tiempo total
+// del bucle y a cambio deja el servidor respondiendo mientras tanto.
+const POW_YIELD_EVERY = 4096;
+
+/**
+ * Resuelve el proof-of-work de embed69.
+ *
+ * Node tiene un solo hilo, así que este bucle no es "lento": es el event loop
+ * congelado. Medido, con dificultad 5 son ~700 ms y en el tope del contador
+ * ~1,3 s en los que no avanza ningún otro segmento en vuelo, ni el de este
+ * usuario ni el de nadie. De ahí que ceda cada POW_YIELD_EVERY intentos.
+ */
+async function resolveProofOfWork(challenge, difficulty) {
+  const prefix = '0'.repeat(difficulty);
+
+  for (let nonce = 0; nonce < POW_MAX_NONCE; nonce += 1) {
+    if (crypto.createHash('sha256').update(challenge + nonce).digest('hex').startsWith(prefix)) {
+      return nonce;
+    }
+    if (nonce % POW_YIELD_EVERY === POW_YIELD_EVERY - 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+
+  return null;
+}
+
+async function extractEmbed69Links(html, pageUrl) {
   const dataLinkJson = matchOne(html, /let\s+dataLink\s*=\s*(\[[\s\S]*?\]);/i);
   const challenge = matchOne(html, /const\s+POW_CHALLENGE\s*=\s*'([^']+)'/i);
   const difficulty = Number(matchOne(html, /const\s+POW_DIFFICULTY\s*=\s*(\d+)/i) || 0);
@@ -473,17 +570,8 @@ function extractEmbed69Links(html, pageUrl) {
     return [];
   }
 
-  const prefix = '0'.repeat(difficulty);
-  let nonce = 0;
-  while (nonce < 2_000_000) {
-    const hash = crypto.createHash('sha256').update(challenge + nonce).digest('hex');
-    if (hash.startsWith(prefix)) {
-      break;
-    }
-    nonce += 1;
-  }
-
-  if (nonce >= 2_000_000) {
+  const nonce = await resolveProofOfWork(challenge, difficulty);
+  if (nonce == null) {
     return [];
   }
 
@@ -523,7 +611,7 @@ async function fetchPlayerMediaUrls(embedUrl, pageUrl) {
 
   for (const headers of attempts) {
     const response = await requestText(embedUrl, headers);
-    const embed69Links = extractEmbed69Links(response.body, embedUrl);
+    const embed69Links = await extractEmbed69Links(response.body, embedUrl);
     if (embed69Links.length) return embed69Links;
     const urls = extractPlayerMediaUrls(response.body, embedUrl);
     if (urls.length) return urls;
@@ -798,54 +886,43 @@ async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = und
   const selectedAudio = audioOptions.find((option) => option.code === requestedAudio)?.code
     || (audioOptions[0] && audioOptions[0].code)
     || null;
+  const comoRespuesta = (fuente, refreshed) => ({
+    provider: fuente.provider || 'file',
+    url: buildPlaybackUrl(req, episode.Id, { audio: selectedAudio }),
+    proxied: true,
+    sourceUrl: fuente.url,
+    referer: fuente.referer,
+    contentType: fuente.contentType,
+    refreshed,
+    canTrackProgress: true,
+    audio: selectedAudio,
+    audioOptions
+  });
+
+  // Abrir la ficha de un anime ya resuelve la reproducción para saber qué
+  // idiomas hay, y al darle a reproducir se resolvía otra vez, y una tercera al
+  // pedir el manifiesto. Eran tres scrapings completos antes del primer
+  // fotograma; ahora los tres comparten este resultado.
+  const cacheada = leerResolucion(episode.Id, selectedAudio);
+  if (cacheada) {
+    return comoRespuesta(cacheada, false);
+  }
+
   const preferredRefresh = selectedAudio ? await refreshVideoSourceFromSnapshot(snapshot, selectedAudio) : null;
   const direct = preferredRefresh ? null : await resolveDirectVideoCandidate(snapshot, episode, selectedAudio);
 
   if (preferredRefresh) {
-    return {
-      provider: preferredRefresh.provider || 'file',
-      url: buildPlaybackUrl(req, episode.Id, { audio: selectedAudio }),
-      proxied: true,
-      sourceUrl: preferredRefresh.url,
-      referer: preferredRefresh.referer,
-      contentType: preferredRefresh.contentType,
-      refreshed: true,
-      canTrackProgress: true,
-      audio: selectedAudio,
-      audioOptions
-    };
+    return comoRespuesta(guardarResolucion(episode.Id, selectedAudio, preferredRefresh), true);
   }
 
   if (direct) {
-    return {
-      provider: direct.provider,
-      url: buildPlaybackUrl(req, episode.Id, { audio: selectedAudio }),
-      proxied: true,
-      sourceUrl: direct.url,
-      referer: direct.referer,
-      contentType: direct.contentType,
-      refreshed: false,
-      canTrackProgress: true,
-      audio: selectedAudio,
-      audioOptions
-    };
+    return comoRespuesta(guardarResolucion(episode.Id, selectedAudio, direct), false);
   }
 
   if (snapshot) {
     const refreshed = await refreshVideoSourceFromSnapshot(snapshot, selectedAudio);
     if (refreshed) {
-      return {
-        provider: refreshed.provider || 'file',
-        url: buildPlaybackUrl(req, episode.Id, { audio: selectedAudio }),
-        proxied: true,
-        sourceUrl: refreshed.url,
-        referer: refreshed.referer,
-        contentType: refreshed.contentType,
-        refreshed: true,
-        canTrackProgress: true,
-        audio: selectedAudio,
-        audioOptions
-      };
+      return comoRespuesta(guardarResolucion(episode.Id, selectedAudio, refreshed), true);
     }
   }
 
@@ -1194,12 +1271,194 @@ router.get('/episodes/:id/playback', async (req, res) => {
   }
 });
 
+// ?u= es una variante o un segmento de un playlist que este mismo proxy
+// reescribió, y trae dentro su URL y el Referer con el que hay que pedirlo. La
+// firma es lo que impide usar el endpoint como proxy abierto a cualquier URL.
+function decodificarSubRecurso(req) {
+  const decodificar = (valor) => Buffer.from(String(valor), 'base64url').toString('utf8');
+
+  let url;
+  let referer = null;
+  try {
+    url = decodificar(req.query.u);
+    if (req.query.r) referer = decodificar(req.query.r);
+  } catch {
+    return { status: 400, error: 'Sub-recurso inválido' };
+  }
+
+  if (!isValidStreamSignature(url, referer, req.query.sig)) {
+    return { status: 403, error: 'Firma inválida para este sub-recurso' };
+  }
+
+  return { url, referer };
+}
+
+/**
+ * Entrega lo que haya en `target`, sea un playlist, un segmento o un archivo
+ * progresivo. `recargar` solo llega cuando la petición es el manifiesto del
+ * episodio: un sub-recurso ya viene firmado y no tiene fuente alternativa que
+ * buscar.
+ */
+async function transmitir(req, res, { episodeId, target, referer, recargar = null }) {
+  if (target.startsWith('/media/')) {
+    return res.redirect(target);
+  }
+
+  // Los playlists ya reescritos se reutilizan un rato: son idénticos para todo
+  // el que pida el mismo episodio y traerlos del origen cuesta cerca de un
+  // segundo, que es tiempo de espera antes del primer fotograma. Se guardan
+  // por URL de origen, así que el token que llevan dentro sigue mandando: en
+  // cuanto cambia, la clave es otra.
+  const cacheado = leerPlaylist(target);
+  if (cacheado) {
+    res.status(200);
+    res.setHeader('content-type', cacheado.contentType);
+    res.setHeader('cache-control', 'no-store');
+    return res.send(cacheado.body);
+  }
+
+  const forwardedHeaders = {
+    'User-Agent': req.get('user-agent') || 'StreamFlix/1.0',
+    Accept: req.get('accept') || '*/*'
+  };
+
+  // Los sub-recursos de un HLS (variantes y segmentos) se piden completos: el
+  // reproductor no busca dentro de ellos, y además aquí se reescribe el
+  // contenido, así que un Range del cliente no correspondería con lo enviado.
+  // En un archivo progresivo sí hay que reenviarlo para que funcione el seek.
+  if (req.headers.range && !req.query.u) forwardedHeaders.Range = req.headers.range;
+  if (referer) forwardedHeaders.Referer = referer;
+
+  const pedir = (url, refererDeTurno) => requestUpstream(url, {
+    ...forwardedHeaders,
+    ...(refererDeTurno ? { Referer: refererDeTurno } : {})
+  });
+
+  let { response: upstream, finalUrl } = await pedir(target, referer);
+
+  // Un error del origen se reporta como error. Estos enlaces caducan (llevan
+  // token), y antes la página de error acababa reescrita como si fuera un
+  // playlist, con lo que el reproductor se quedaba en negro sin explicación.
+  if (upstream.statusCode >= 400) {
+    upstream.resume();
+
+    // Algunos hosts (como Uqload) firman la URL final del m3u8 y la dejan
+    // caducar enseguida. Si el snapshot todavía conserva el embed del que
+    // salió, se vuelve a resolver aquí mismo para obtener un enlace fresco.
+    const fresca = recargar ? await recargar() : null;
+    if (fresca) {
+      target = fresca.url;
+      referer = fresca.referer;
+      ({ response: upstream, finalUrl } = await pedir(target, referer));
+    }
+
+    if (upstream.statusCode >= 400) {
+      upstream.resume();
+      return res.status(502).json({
+        error: `El origen del video respondió ${upstream.statusCode}. ` +
+          'Es probable que el enlace haya caducado: vuelve a importar el capítulo.',
+        upstreamStatus: upstream.statusCode
+      });
+    }
+  }
+
+  // Un playlist se reescribe entero antes de mandarlo: si no, hls.js pediría
+  // las variantes y segmentos directo al CDN y volvería el problema de CORS.
+  if (/\.m3u8(?:$|\?)/i.test(finalUrl) || /mpegurl/i.test(upstream.headers['content-type'] || '')) {
+    let body = await leerCuerpo(upstream);
+
+    // Si pese a todo no es un playlist —una página de error del CDN, que es
+    // como se manifiesta un token caducado— se busca una fuente fresca en vez
+    // de inventarle segmentos.
+    if (!isPlaylistResponse(upstream.headers['content-type'], body)) {
+      const fresca = recargar ? await recargar() : null;
+      if (fresca) {
+        target = fresca.url;
+        referer = fresca.referer;
+        ({ response: upstream, finalUrl } = await pedir(target, referer));
+        body = await leerCuerpo(upstream);
+      }
+
+      if (!fresca || !isPlaylistResponse(upstream.headers['content-type'], body)) {
+        return res.status(502)
+          .json({ error: 'El origen no devolvió un playlist válido; el enlace pudo caducar.' });
+      }
+    }
+
+    const rewritten = rewritePlaylist(body.toString('utf8'), finalUrl, episodeId, referer);
+    guardarPlaylist(target, rewritten, upstream.headers['content-type']);
+    // Siempre 200: lo que se manda es el playlist reescrito completo, no el
+    // cuerpo original, así que un 206 de arriba dejaría de tener sentido.
+    res.status(200);
+    res.setHeader('content-type', upstream.headers['content-type'] || 'application/vnd.apple.mpegurl');
+    res.setHeader('cache-control', 'no-store');
+    return res.send(rewritten);
+  }
+
+  if (isDisguisedSegment(upstream.headers['content-type'])) {
+    // Igual que con el playlist: se entrega el segmento ya destapado entero.
+    const segment = unwrapSegment(await leerCuerpo(upstream));
+    res.status(200);
+    res.setHeader('content-type', 'video/mp2t');
+    res.setHeader('content-length', String(segment.length));
+    return res.end(segment);
+  }
+
+  const passthroughHeaders = [
+    'content-type',
+    'content-length',
+    'content-range',
+    'accept-ranges',
+    'cache-control',
+    'last-modified',
+    'etag'
+  ];
+
+  res.status(upstream.statusCode || 200);
+  for (const headerName of passthroughHeaders) {
+    const value = upstream.headers[headerName];
+    if (value != null) {
+      res.setHeader(headerName, value);
+    }
+  }
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+
+  upstream.on('error', (error) => {
+    if (!res.headersSent) {
+      res.status(502).json({ error: error.message });
+    } else {
+      res.destroy(error);
+    }
+  });
+
+  req.on('close', () => {
+    upstream.destroy();
+  });
+
+  upstream.pipe(res);
+}
+
 // GET /api/episodes/:id/stream  -> proxy de reproducción para archivos remotos
 router.get('/episodes/:id/stream', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'Id inválido' });
 
   try {
+    // Un sub-recurso se atiende antes de tocar la base de datos, porque no hay
+    // nada que resolver: llega firmado con su URL y su Referer.
+    //
+    // Esta comprobación estaba al final, después de rehacer la resolución
+    // completa del episodio. Como un capítulo de 24 min son ~70 segmentos, se
+    // pagaban ~70 resoluciones (consultas SQL, un sondeo HEAD+GET contra el CDN
+    // por cada candidato y, en cuanto los enlaces guardados caducaban, un
+    // scraping entero con su proof-of-work) para acabar usando solo el Referer.
+    // Era lo que hacía que el vídeo se parase cada pocos segundos.
+    if (req.query.u) {
+      const sub = decodificarSubRecurso(req);
+      if (sub.error) return res.status(sub.status).json({ error: sub.error });
+      return await transmitir(req, res, { episodeId: id, target: sub.url, referer: sub.referer });
+    }
+
     const pool = await getPool();
     const result = await pool.request()
       .input('id', sql.Int, id)
@@ -1222,227 +1481,48 @@ router.get('/episodes/:id/stream', async (req, res) => {
       return res.status(404).json({ error: 'Episodio no encontrado' });
     }
 
-    const snapshot = await findEpisodeSnapshot(pool, episode);
     const preferredAudio = audioPreferenceFromReq(req);
-    const direct = await resolveDirectVideoCandidate(snapshot, episode, preferredAudio);
-    const refreshed = direct ? null : await refreshVideoSourceFromSnapshot(snapshot, preferredAudio);
-
-    const candidates = [
-      direct && { url: direct.url, referer: direct.referer },
-      refreshed && { url: refreshed.url, referer: refreshed.referer },
-      ...collectDirectVideoCandidates(snapshot, episode, preferredAudio)
-    ].filter(Boolean);
-
-    if (!candidates.length) {
-      return res.status(404).json({ error: 'No se encontró una fuente de video reproducible' });
-    }
-
-    let selected = candidates[0];
-
-    // ?u= es una variante o un segmento de un playlist que este mismo proxy
-    // reescribió; la firma es lo que impide pedirle cualquier URL de internet.
-    let target = selected.url;
-    if (req.query.u) {
-      let requested;
-      try {
-        requested = Buffer.from(String(req.query.u), 'base64url').toString('utf8');
-      } catch {
-        return res.status(400).json({ error: 'Sub-recurso inválido' });
-      }
-
-      if (!isValidStreamSignature(requested, req.query.sig)) {
-        return res.status(403).json({ error: 'Firma inválida para este sub-recurso' });
-      }
-
-      target = requested;
-    }
-
-    if (target.startsWith('/media/')) {
-      return res.redirect(target);
-    }
-
-    // Los playlists ya reescritos se reutilizan un rato: son idénticos para todo
-    // el que pida el mismo episodio y traerlos del origen cuesta cerca de un
-    // segundo, que es tiempo de espera antes del primer fotograma. Se guardan
-    // por URL de origen, así que el token que llevan dentro sigue mandando: en
-    // cuanto cambia, la clave es otra.
-    const cacheado = leerPlaylist(target);
-    if (cacheado) {
-      res.status(200);
-      res.setHeader('content-type', cacheado.contentType);
-      res.setHeader('cache-control', 'no-store');
-      return res.send(cacheado.body);
-    }
-
-    const forwardedHeaders = {
-      'User-Agent': req.get('user-agent') || 'StreamFlix/1.0',
-      Accept: req.get('accept') || '*/*'
+    let snapshot = null;
+    const cargarSnapshot = async () => {
+      if (snapshot === null) snapshot = await findEpisodeSnapshot(pool, episode);
+      return snapshot;
     };
 
-    // Los sub-recursos de un HLS (variantes y segmentos) se piden completos: el
-    // reproductor no busca dentro de ellos, y además aquí se reescribe el
-    // contenido, así que un Range del cliente no correspondería con lo enviado.
-    // En un archivo progresivo sí hay que reenviarlo para que funcione el seek.
-    if (req.headers.range && !req.query.u) forwardedHeaders.Range = req.headers.range;
-    if (selected.referer) forwardedHeaders.Referer = selected.referer;
+    // Descarta lo cacheado y vuelve a resolver: se llama cuando el origen
+    // contesta con un error o con algo que no es un playlist.
+    const recargar = async () => {
+      olvidarResolucion(id, preferredAudio);
+      const fresca = await refreshVideoSourceFromSnapshot(await cargarSnapshot(), preferredAudio);
+      return fresca ? guardarResolucion(id, preferredAudio, fresca) : null;
+    };
 
-    let { response: upstream, finalUrl } = await requestUpstream(target, forwardedHeaders);
+    let fuente = leerResolucion(id, preferredAudio);
+    if (!fuente) {
+      const snap = await cargarSnapshot();
+      const direct = await resolveDirectVideoCandidate(snap, episode, preferredAudio);
+      const refreshed = direct ? null : await refreshVideoSourceFromSnapshot(snap, preferredAudio);
+      const verificada = direct || refreshed;
 
-    // Un error del origen se reporta como error. Estos enlaces caducan (llevan
-    // token), y antes la página de error acababa reescrita como si fuera un
-    // playlist, con lo que el reproductor se quedaba en negro sin explicación.
-    if (upstream.statusCode >= 400) {
-      upstream.resume();
-
-      // Algunos hosts (como Uqload) firman la URL final del m3u8 y la dejan
-      // caducar enseguida. Si el snapshot todavía conserva el embed del que
-      // salió, se vuelve a resolver aquí mismo para obtener un enlace fresco.
-      if (!req.query.u && snapshot) {
-        const refreshed = await refreshVideoSourceFromSnapshot(snapshot, preferredAudio);
-        if (refreshed) {
-          selected = { url: refreshed.url, referer: refreshed.referer };
-          target = selected.url;
-          const retryHeaders = {
-            ...forwardedHeaders,
-            Referer: selected.referer
-          };
-          ({ response: upstream, finalUrl } = await requestUpstream(target, retryHeaders));
-        }
+      fuente = verificada || collectDirectVideoCandidates(snap, episode, preferredAudio)[0] || null;
+      if (!fuente) {
+        return res.status(404).json({ error: 'No se encontró una fuente de video reproducible' });
       }
 
-      if (upstream.statusCode >= 400) {
-        upstream.resume();
-        return res.status(502).json({
-          error: `El origen del video respondió ${upstream.statusCode}. ` +
-            'Es probable que el enlace haya caducado: vuelve a importar el capítulo.',
-          upstreamStatus: upstream.statusCode
-        });
-      }
+      // Solo se guarda lo que se ha comprobado contra el origen: ese último
+      // candidato es un intento a ciegas y no trae ni provider ni content-type,
+      // que es lo que /playback necesita para elegir reproductor.
+      if (verificada) guardarResolucion(id, preferredAudio, verificada);
     }
 
-    // Un playlist se reescribe entero antes de mandarlo: si no, hls.js pediría
-    // las variantes y segmentos directo al CDN y volvería el problema de CORS.
-    if (/\.m3u8(?:$|\?)/i.test(finalUrl) || /mpegurl/i.test(upstream.headers['content-type'] || '')) {
-      const chunks = [];
-      upstream.on('data', (chunk) => chunks.push(chunk));
-      upstream.on('error', (error) => {
-        if (!res.headersSent) res.status(502).json({ error: error.message });
-      });
-
-      return upstream.on('end', () => {
-        const body = Buffer.concat(chunks);
-
-        // Si pese a todo no es un playlist, se manda tal cual en vez de
-        // inventarle segmentos.
-        if (!isPlaylistResponse(upstream.headers['content-type'], body)) {
-          if (!req.query.u && snapshot) {
-            refreshVideoSourceFromSnapshot(snapshot, preferredAudio)
-              .then(async (refreshed) => {
-                if (!refreshed) {
-                  res.status(502);
-                  return res.json({ error: 'El origen no devolvió un playlist válido; el enlace pudo caducar.' });
-                }
-
-                const retryHeaders = {
-                  ...forwardedHeaders,
-                  Referer: refreshed.referer
-                };
-                const retry = await requestUpstream(refreshed.url, retryHeaders);
-                const retryChunks = [];
-                retry.response.on('data', (chunk) => retryChunks.push(chunk));
-                retry.response.on('error', (error) => {
-                  if (!res.headersSent) res.status(502).json({ error: error.message });
-                });
-                retry.response.on('end', () => {
-                  const retryBody = Buffer.concat(retryChunks);
-                  if (!isPlaylistResponse(retry.response.headers['content-type'], retryBody)) {
-                    res.status(502);
-                    return res.json({ error: 'El origen no devolvió un playlist válido; el enlace pudo caducar.' });
-                  }
-
-                  const rewrittenRetry = rewritePlaylist(retryBody.toString('utf8'), retry.finalUrl, id);
-                  guardarPlaylist(refreshed.url, rewrittenRetry, retry.response.headers['content-type']);
-                  res.status(200);
-                  res.setHeader('content-type', retry.response.headers['content-type'] || 'application/vnd.apple.mpegurl');
-                  res.setHeader('cache-control', 'no-store');
-                  res.send(rewrittenRetry);
-                });
-              })
-              .catch((error) => {
-                if (!res.headersSent) {
-                  res.status(502).json({ error: error.message });
-                }
-              });
-            return;
-          }
-
-          res.status(502);
-          return res.json({ error: 'El origen no devolvió un playlist válido; el enlace pudo caducar.' });
-        }
-
-        const rewritten = rewritePlaylist(body.toString('utf8'), finalUrl, id);
-        guardarPlaylist(target, rewritten, upstream.headers['content-type']);
-        // Siempre 200: lo que se manda es el playlist reescrito completo, no el
-        // cuerpo original, así que un 206 de arriba dejaría de tener sentido.
-        res.status(200);
-        res.setHeader('content-type', upstream.headers['content-type'] || 'application/vnd.apple.mpegurl');
-        res.setHeader('cache-control', 'no-store');
-        res.send(rewritten);
-      });
-    }
-
-    if (isDisguisedSegment(upstream.headers['content-type'])) {
-      const chunks = [];
-      upstream.on('data', (chunk) => chunks.push(chunk));
-      upstream.on('error', (error) => {
-        if (!res.headersSent) res.status(502).json({ error: error.message });
-      });
-
-      return upstream.on('end', () => {
-        const segment = unwrapSegment(Buffer.concat(chunks));
-        // Igual que con el playlist: se entrega el segmento ya destapado entero.
-        res.status(200);
-        res.setHeader('content-type', 'video/mp2t');
-        res.setHeader('content-length', String(segment.length));
-        res.end(segment);
-      });
-    }
-
-    const passthroughHeaders = [
-      'content-type',
-      'content-length',
-      'content-range',
-      'accept-ranges',
-      'cache-control',
-      'last-modified',
-      'etag'
-    ];
-
-    res.status(upstream.statusCode || 200);
-    for (const headerName of passthroughHeaders) {
-      const value = upstream.headers[headerName];
-      if (value != null) {
-        res.setHeader(headerName, value);
-      }
-    }
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
-
-    upstream.on('error', (error) => {
-      if (!res.headersSent) {
-        res.status(502).json({ error: error.message });
-      } else {
-        res.destroy(error);
-      }
+    return await transmitir(req, res, {
+      episodeId: id,
+      target: fuente.url,
+      referer: fuente.referer || null,
+      recargar
     });
-
-    req.on('close', () => {
-      upstream.destroy();
-    });
-
-    upstream.pipe(res);
   } catch (err) {
     console.error(err);
-    res.status(502).json({ error: 'Error al transmitir el video' });
+    if (!res.headersSent) res.status(502).json({ error: 'Error al transmitir el video' });
   }
 });
 
