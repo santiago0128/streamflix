@@ -117,6 +117,42 @@ que revise y reimporte lo que se haya roto:
 0 5 * * * cd /opt/streamflix/jk-anime-launcher && STREAMFLIX_ROOT=/opt/streamflix/streamflix JK_NO_BROWSER=1 node check_streamflix_links.js --fix >> /var/log/streamflix-import.log 2>&1
 ```
 
+## 3.1 Atender las solicitudes de contenido
+
+Lo que la gente pide desde **Solicitar** se guarda en `dbo.ContentRequests` y se
+queda en `pendiente` hasta que alguien lo atiende. De eso se encarga
+`procesar_solicitudes.js`, en el repositorio del bot: coge las pendientes por
+orden de llegada, lanza el importador y deja cada una en `listo` o `rechazada`,
+avisando por Telegram del resultado.
+
+```bash
+cd /opt/streamflix/jk-anime-launcher
+export STREAMFLIX_ROOT=/opt/streamflix/streamflix
+
+node procesar_solicitudes.js --dry-run   # qué haría, sin tocar nada
+node procesar_solicitudes.js             # atiende la cola
+```
+
+En cron, para que no haga falta acordarse:
+
+```cron
+*/15 * * * * cd /opt/streamflix/jk-anime-launcher && STREAMFLIX_ROOT=/opt/streamflix/streamflix JK_NO_BROWSER=1 node procesar_solicitudes.js >> /var/log/streamflix-solicitudes.log 2>&1
+```
+
+Va **de una en una**: veinte importaciones a la vez son veinte descargas
+compitiendo por el mismo servidor y acaban fallando todas. Dos ejecuciones que se
+solapen tampoco se pisan — hay un cerrojo, y cada solicitud se reclama con un
+`UPDATE` condicional, así que solo una puede cogerla.
+
+Un título que no aparezca **no se importa a lo que más se le parezca**: queda en
+`rechazada` con el motivo. Importar *Stealing Pulp Fiction* porque alguien pidió
+*Pulp Fiction* es peor que no importar nada, y deshacerlo cuesta más que hacerlo
+a mano. Para forzar un parecido concreto se importa a mano con `--accept-similar`.
+
+**Cualquiera con cuenta puede encolar importaciones**, que es lo que se pidió: no
+hay tope ni aprobación. Si algún día molesta, el freno más simple es bajar el
+límite de pendientes por usuario en [server/routes/requests.js](../server/routes/requests.js).
+
 ## 4. Proxy inverso
 
 La app escucha solo en `127.0.0.1:3000`. Delante va nginx o Caddy con el
