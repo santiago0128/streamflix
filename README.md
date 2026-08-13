@@ -137,23 +137,32 @@ UPDATE dbo.ContentRequests SET Status = 'listo' WHERE Id = 12;
 
 ## Donaciones
 
-El botón **Donar** usa Checkout Pro de Mercado Pago. El servidor crea la
-preferencia de pago con `MP_ACCESS_TOKEN` y devuelve el enlace al que se manda al
-donante; los datos de la tarjeta nunca pasan por aquí.
+El botón **Donar** lleva a Mercado Pago. Los datos de la tarjeta no pasan por
+aquí en ningún caso. Hay dos formas de tenerlo montado y **si están las dos,
+manda el enlace**:
 
-**Sin `MP_ACCESS_TOKEN` el botón no aparece**: la web pregunta primero a
-`/api/donations/config`, para no enseñar un botón que lleva a un error. Los
-importes sugeridos, la moneda y los límites salen del `.env` porque dependen del
-país de la cuenta — 5000 no significa lo mismo en pesos colombianos que en otra
-moneda. Sin importes configurados se enseña solo el campo libre, en vez de
-proponer cifras inventadas.
+| | `MP_DONATION_LINK` (recomendada) | `MP_ACCESS_TOKEN` (Checkout Pro) |
+|---|---|---|
+| Credenciales | ninguna | un token que puede cobrar |
+| Importe | lo pone el donante en Mercado Pago | se elige en la web, con sugerencias |
+| Si el servidor cae | sigue funcionando | deja de funcionar |
+| Configuración | una variable | moneda, importes, límites, `PUBLIC_BASE_URL` |
 
-Conviene fijar `PUBLIC_BASE_URL` con la dirección pública: es a donde Mercado
-Pago devuelve al donante, y detrás del proxy inverso no se puede deducir de la
-petición. Con `https` se activa además el retorno automático.
+Para una donación, el enlace es lo que conviene: no hay secreto que guardar, no
+caduca y tiene menos formas de romperse. Se crea en el panel de Mercado Pago
+(*Cobrar* → *Link de pago*).
 
-Para probar sin cobrar de verdad sirve el token de prueba (`TEST-...`) del panel
-de Mercado Pago, que devuelve un enlace de sandbox.
+Checkout Pro solo compensa cuando el pago tiene que **atarse a algo** de aquí —
+desbloquear una cuenta, registrar quién pagó, dar una suscripción. Una donación
+no ata nada, así que ese modo añade un secreto y varias formas nuevas de fallar
+a cambio de poco. Si aun así se quiere: el servidor crea la preferencia, hacen
+falta las variables de la tabla, y conviene fijar `PUBLIC_BASE_URL` con la
+dirección pública porque es a donde Mercado Pago devuelve al donante y detrás del
+proxy inverso no se puede deducir. Con `https` se activa el retorno automático, y
+el token de prueba (`TEST-...`) devuelve un enlace de sandbox.
+
+**Sin ninguna de las dos, el botón no aparece**: la web pregunta primero a
+`/api/donations/config`, para no enseñar un botón que lleva a un error.
 
 ## Verificar el contenido
 

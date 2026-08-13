@@ -1231,6 +1231,25 @@
     donacion = { min: Number(config.min) || 1, max: Number(config.max) || 1000000 };
     $('donateCurrency').textContent = config.currency ? `(${config.currency})` : '';
     $('donateBtn').hidden = false;
+    $('donateBtn').addEventListener('click', () => {
+      donateError('');
+      openModal(donateModal);
+    });
+
+    // Con un enlace de pago el importe lo pone Mercado Pago en su propia
+    // página, así que aquí sobra el campo: pedirlo dos veces solo confunde.
+    if (config.mode === 'link') {
+      $('donateAmountField').hidden = true;
+      $('donatePresets').hidden = true;
+      const ir = $('donateSubmit');
+      ir.textContent = 'Ir a Mercado Pago';
+      ir.addEventListener('click', () => {
+        // Pestaña nueva: quien esté viendo algo no pierde dónde iba.
+        window.open(config.link, '_blank', 'noopener');
+        closeModal(donateModal);
+      });
+      return;
+    }
 
     const caja = $('donatePresets');
     caja.innerHTML = '';
@@ -1246,11 +1265,6 @@
       });
       caja.appendChild(boton);
     }
-
-    $('donateBtn').addEventListener('click', () => {
-      donateError('');
-      openModal(donateModal);
-    });
 
     $('donateSubmit').addEventListener('click', async () => {
       const boton = $('donateSubmit');

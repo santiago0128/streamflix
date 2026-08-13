@@ -5,9 +5,22 @@ const router = express.Router();
 
 const MP_API = 'https://api.mercadopago.com/checkout/preferences';
 
-// Sin token no hay integración posible: en vez de enseñar un botón que lleva a
-// un error, la web pregunta por /config y no lo pinta.
-const configurado = () => Boolean(process.env.MP_ACCESS_TOKEN);
+/**
+ * Dos maneras de recibir donaciones, y el enlace manda.
+ *
+ * MP_DONATION_LINK es un enlace de pago creado en el panel de Mercado Pago: no
+ * necesita credenciales, no puede caducar y sigue funcionando aunque este
+ * servidor esté caído. Para una donación es lo que conviene — Checkout Pro solo
+ * compensa cuando el pago tiene que atarse a algo de aquí (desbloquear una
+ * cuenta, registrar quién pagó), y una donación no ata nada.
+ *
+ * MP_ACCESS_TOKEN queda para quien quiera lo segundo: importes elegidos dentro
+ * de la web y vuelta automática al sitio. Es una credencial que puede cobrar,
+ * así que si hay enlace no se usa.
+ */
+const enlace = () => String(process.env.MP_DONATION_LINK || '').trim();
+const modo = () => (enlace() ? 'link' : (process.env.MP_ACCESS_TOKEN ? 'checkout' : null));
+const configurado = () => Boolean(modo());
 
 /**
  * Los importes sugeridos y la moneda salen del entorno porque dependen del país
@@ -87,10 +100,14 @@ function crearPreferencia(payload) {
 
 // GET /api/donations/config -> qué puede enseñar la web
 router.get('/config', (req, res) => {
+  const actual = modo();
   res.json({
-    enabled: configurado(),
+    enabled: Boolean(actual),
+    mode: actual,
+    // Solo en modo enlace: en Checkout Pro no hay nada público que enseñar.
+    link: actual === 'link' ? enlace() : null,
     currency: process.env.MP_CURRENCY || null,
-    presets: presets(),
+    presets: actual === 'checkout' ? presets() : [],
     min: minimo(),
     max: maximo()
   });
@@ -99,8 +116,10 @@ router.get('/config', (req, res) => {
 // POST /api/donations/preference  { amount }
 // Sin sesión a propósito: una donación no debería exigir registrarse.
 router.post('/preference', async (req, res) => {
-  if (!configurado()) {
-    return res.status(503).json({ error: 'Las donaciones no están configuradas en este servidor' });
+  if (modo() !== 'checkout') {
+    // En modo enlace no se crea nada: la web manda directo a Mercado Pago y
+    // esta ruta no debería llamarse.
+    return res.status(503).json({ error: 'Las donaciones no usan Checkout Pro en este servidor' });
   }
   if (demasiadas(req.ip)) {
     return res.status(429).json({ error: 'Demasiados intentos seguidos. Prueba en un rato.' });
