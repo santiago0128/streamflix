@@ -1313,24 +1313,17 @@
 
   // ===================== BIENVENIDA =====================
   const welcomeModal = $('welcomeModal');
-  const WELCOME_SEEN_KEY = 'streamflix_welcome_seen';
 
   /**
-   * Una vez por visita, no en cada carga.
+   * En cada carga de la página.
    *
-   * sessionStorage y no localStorage: así vuelve a salir la próxima vez que
-   * alguien entra, pero no cada vez que recarga o vuelve atrás en mitad de una
-   * sesión, que es lo que convierte un aviso en una molestia.
+   * Aquí hubo una marca en sessionStorage para enseñarlo una sola vez por
+   * visita. No es lo que se pidió: la idea es que nadie se pierda que se puede
+   * pedir contenido, y quien recarga es justo quien todavía no lo ha leído.
    */
   function mostrarBienvenida() {
-    try {
-      if (sessionStorage.getItem(WELCOME_SEEN_KEY) === '1') return;
-      sessionStorage.setItem(WELCOME_SEEN_KEY, '1');
-    } catch {
-      /* navegación privada sin almacenamiento: se enseña y ya */
-    }
-    // Al volver de Mercado Pago no: ahí ya hay un aviso de agradecimiento, y
-    // pedir dinero justo después de que alguien acabe de darlo sobra.
+    // La única excepción: al volver de Mercado Pago ya hay un agradecimiento en
+    // pantalla, y pedir justo después de que alguien acabe de dar sobra.
     if (new URLSearchParams(window.location.search).get('donacion')) return;
     openModal(welcomeModal);
   }

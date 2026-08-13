@@ -132,18 +132,17 @@ se puede **pedir** contenido que falte, y que hay un botón de **donar** para el
 servidor. Cada bloque dice también lo que *no* promete —ni plazos ni ventajas por
 donar—, que es lo que evita la queja después.
 
-Sale **una vez por visita**, no en cada carga: se recuerda en `sessionStorage`,
-así que vuelve a aparecer la próxima vez que alguien entre, pero no al recargar
-ni al volver atrás en mitad de una sesión, que es lo que convierte un aviso en
-una molestia. La casilla «No volver a mostrar» se guarda en `localStorage` y
-manda sobre lo anterior.
+Sale **en cada carga de la página**, a propósito: la idea es que nadie se pierda
+que se puede pedir contenido, y quien recarga es justo quien todavía no lo ha
+leído. No se recuerda nada entre cargas.
 
 El bloque de donaciones solo aparece si hay donaciones configuradas, y el modal
 no sale al volver de Mercado Pago: ahí ya hay un agradecimiento, y volver a pedir
 justo después de que alguien haya dado sobra.
 
-Para que salga literalmente en cada carga, basta con quitar la comprobación de
-`sessionStorage` en `mostrarBienvenida()` ([public/js/app.js](public/js/app.js)).
+Para enseñarlo una sola vez por visita, basta con marcarlo en `sessionStorage`
+dentro de `mostrarBienvenida()` ([public/js/app.js](public/js/app.js)) y salir si
+la marca ya está.
 
 ## Solicitar contenido
 
