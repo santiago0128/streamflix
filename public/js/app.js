@@ -1313,7 +1313,6 @@
 
   // ===================== BIENVENIDA =====================
   const welcomeModal = $('welcomeModal');
-  const WELCOME_SKIP_KEY = 'streamflix_welcome_skip';
   const WELCOME_SEEN_KEY = 'streamflix_welcome_seen';
 
   /**
@@ -1321,11 +1320,9 @@
    *
    * sessionStorage y no localStorage: así vuelve a salir la próxima vez que
    * alguien entra, pero no cada vez que recarga o vuelve atrás en mitad de una
-   * sesión, que es lo que convierte un aviso en una molestia. Quien no lo quiera
-   * ver más lo dice con la casilla, y eso sí se recuerda entre sesiones.
+   * sesión, que es lo que convierte un aviso en una molestia.
    */
   function mostrarBienvenida() {
-    if (localStorage.getItem(WELCOME_SKIP_KEY) === '1') return;
     try {
       if (sessionStorage.getItem(WELCOME_SEEN_KEY) === '1') return;
       sessionStorage.setItem(WELCOME_SEEN_KEY, '1');
@@ -1337,11 +1334,6 @@
     if (new URLSearchParams(window.location.search).get('donacion')) return;
     openModal(welcomeModal);
   }
-
-  $('welcomeSkip').addEventListener('change', (event) => {
-    if (event.target.checked) localStorage.setItem(WELCOME_SKIP_KEY, '1');
-    else localStorage.removeItem(WELCOME_SKIP_KEY);
-  });
 
   $('welcomeStart').addEventListener('click', () => closeModal(welcomeModal));
   $('welcomeRequest').addEventListener('click', () => {
