@@ -47,3 +47,26 @@ jobs:
           ssh -i ~/.ssh/id_deploy -o BatchMode=yes \
             ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
             "/opt/streamflix/deploy.sh streamflix"
+
+      # Una tabla nueva en schema.sql se quedaba sin crear hasta que alguien
+      # entraba al servidor a mano, y mientras tanto la función que la usa
+      # fallaba en producción sin más aviso. Se puede correr en cada despliegue
+      # porque schema.sql es idempotente y seed.sql está envuelto en un
+      # IF NOT EXISTS sobre dbo.Series: con catálogo cargado no hace nada.
+      - name: Aplicar el esquema de la base
+        run: |
+          set -euo pipefail
+          for intento in 1 2 3 4 5; do
+            if ssh -i ~/.ssh/id_deploy -o BatchMode=yes \
+                 ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+                 "cd /opt/streamflix/streamflix && \
+                  docker compose -f docker-compose.prod.yml exec -T app node server/db/init.js"
+            then
+              exit 0
+            fi
+            # El contenedor puede estar aún reiniciándose tras la reconstrucción.
+            echo "Intento $intento fallido; reintento en 10 s."
+            sleep 10
+          done
+          echo "No se pudo aplicar el esquema tras 5 intentos."
+          exit 1

@@ -39,6 +39,27 @@ services:
       DB_NAME: "${DB_NAME:-StreamFlix}"
       JWT_SECRET: "${JWT_SECRET:?falta JWT_SECRET en .env}"
       PORT: "3000"
+
+      # Al contenedor de la app no se le monta el .env —solo al del bot—, así
+      # que lo que no esté listado aquí no existe dentro por mucho que esté en
+      # el fichero. Sin esto, el botón de donar no aparecía y los avisos de
+      # solicitudes no se enviaban, en los dos casos sin dar ningún error.
+
+      # Donaciones. El enlace de pago es público (no es un secreto), así que
+      # viene con valor por defecto y el sitio funciona sin tocar el .env.
+      MP_DONATION_LINK: "${MP_DONATION_LINK:-https://link.mercadopago.com.co/noxis}"
+      # Solo si algún día se usa Checkout Pro en vez del enlace.
+      MP_ACCESS_TOKEN: "${MP_ACCESS_TOKEN:-}"
+      MP_CURRENCY: "${MP_CURRENCY:-}"
+      MP_DONATION_PRESETS: "${MP_DONATION_PRESETS:-}"
+      MP_MIN_AMOUNT: "${MP_MIN_AMOUNT:-}"
+      MP_MAX_AMOUNT: "${MP_MAX_AMOUNT:-}"
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-}"
+
+      # Avisos de solicitudes de contenido. Estos sí son secretos: salen del
+      # .env y, si faltan, la solicitud se guarda igual y no se avisa.
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID:-}"
     # Solo escucha en localhost del host: el acceso público entra por el
     # proxy inverso (nginx/Caddy), que es quien pone HTTPS.
     ports:
