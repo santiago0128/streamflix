@@ -173,6 +173,12 @@ const Player = (() => {
     toggleEpMenu(false);
     settingsPanel.hidden = true;
     if (typeof hooks.onClose === 'function') hooks.onClose(getPlaybackSnapshot());
+    // Invalida la carga que pueda estar en vuelo. Resolver la fuente es una
+    // llamada a la API, y al volver de ella load() asigna el src y arranca la
+    // reproducción: cerrando en esa ventana, el vídeo se ponía a sonar con el
+    // reproductor ya cerrado y sin nada visible que pararlo. La guarda de
+    // load() compara contra este número, así que basta con moverlo.
+    loadSequence += 1;
     teardownSource();
     overlay.hidden = true;
     soltarPantalla();
@@ -186,7 +192,12 @@ const Player = (() => {
     video.removeAttribute('src');
     video.load();
     videoEmbed.hidden = true;
-    videoEmbed.removeAttribute('src');
+    // Aquí estaba removeAttribute('src'), y no bastaba: quitar el atributo no
+    // descarga el documento que ya está dentro, así que el reproductor de
+    // terceros seguía sonando detrás con el nuestro cerrado. Navegar a
+    // about:blank sí lo tira, y es lo único que puede hacerse sobre un iframe
+    // de otro origen.
+    if (videoEmbed.getAttribute('src')) videoEmbed.src = 'about:blank';
   }
 
   /**
@@ -454,6 +465,10 @@ const Player = (() => {
   }
 
   function startPlayback() {
+    // Último cerrojo: por aquí pasa todo lo que arranca el vídeo, y con el
+    // reproductor cerrado no hay ningún motivo para sonar. Cubre los avisos que
+    // llegan tarde, como el MANIFEST_PARSED de hls.js.
+    if (overlay.hidden) return;
     video.play().catch((error) => {
       // Si el navegador bloquea el autoplay con sonido, se reintenta en silencio
       // antes de dejar el video parado.
