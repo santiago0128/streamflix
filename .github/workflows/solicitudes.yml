@@ -55,7 +55,16 @@ jobs:
           cd /opt/streamflix/jk-anime-launcher
 
           if git rev-parse --git-dir >/dev/null 2>&1; then
-            git pull --ff-only
+            # Un fallo aquí no puede tumbar el trabajo: con `set -e`, un
+            # `git pull` que no avanza —un fichero tocado a mano en el
+            # servidor, una rama divergida— acababa con el paso entero, y como
+            # el de atender la cola va después, dejaba de atenderse. La cola
+            # parada no avisa: las solicitudes se quedan en 'pendiente' y
+            # parece que nadie las pidió. Sin poder actualizar se trabaja con
+            # la versión que haya, que es mejor que no trabajar.
+            if ! git pull --ff-only; then
+              echo "::warning::No pude actualizar el bot (¿cambios locales o rama divergida en el servidor?). Sigo con la versión instalada."
+            fi
           else
             echo "-----------------------------------------------------------"
             echo "/opt/streamflix/jk-anime-launcher no es un clon de git, así"
