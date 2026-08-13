@@ -1,12 +1,17 @@
 name: Atender solicitudes de contenido
 
-# A mano: cada ejecución lanza importaciones reales en el servidor.
+# Cada hora, y también a mano cuando haga falta.
 #
-# Para que la cola se atienda sola hay dos caminos. El barato es un cron en el
-# servidor (ver deploy/README). El otro es descomentar el bloque schedule de
-# aquí abajo, que no necesita tocar el servidor pero consume minutos de Actions:
-# cada cuarto de hora son ~2.900 minutos al mes, por encima del plan gratuito de
-# un repositorio privado. Cada dos horas se queda en ~360.
+# La cola se quedaba parada porque atenderla dependía de que alguien se acordase
+# —de pulsar un botón o de montar un cron en el servidor— y una petición puede
+# esperar días sin que nada lo delate. Programarla aquí no necesita tocar el
+# servidor.
+#
+# El coste en minutos de Actions sale barato porque casi todas las vueltas
+# encuentran la cola vacía y duran medio minuto: unos 360 minutos al mes, muy por
+# debajo del plan gratuito. Solo gastan de verdad las que importan algo, que es
+# cuando el gasto está justificado. Un cron en el servidor sigue siendo gratis
+# del todo (ver deploy/README) y puede sustituir a esto.
 on:
   workflow_dispatch:
     inputs:
@@ -18,8 +23,8 @@ on:
         description: 'Cuántas atender como mucho (vacío = todas)'
         type: string
         default: ''
-  # schedule:
-  #   - cron: '0 */2 * * *'
+  schedule:
+    - cron: '17 * * * *'
 
 # Dos ejecuciones a la vez sobre el mismo servidor no acaban bien. El worker
 # tiene su propio cerrojo, pero mejor no llegar a depender de él.
