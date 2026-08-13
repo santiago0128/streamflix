@@ -125,8 +125,20 @@ queda en `pendiente` hasta que alguien lo atiende. De eso se encarga
 orden de llegada, lanza el importador y deja cada una en `listo` o `rechazada`,
 avisando por Telegram del resultado.
 
+Lo cómodo es la acción **«Atender solicitudes de contenido»** en la pestaña
+Actions: actualiza el bot en el servidor (`git pull`) y ejecuta el worker, sin
+tener que abrir una terminal. Marcando `simular` solo enseña la cola.
+
+El bot vive en **su propio repositorio** y el despliegue de la web no lo toca,
+así que ese `git pull` no es un adorno: sin él, el servidor corre la versión que
+tuviera —o ninguna, si el worker aún no ha llegado allí. Si esa carpeta no fuese
+un clon de git, la acción lo dice y se para en vez de correr algo viejo.
+
+A mano es lo mismo:
+
 ```bash
 cd /opt/streamflix/jk-anime-launcher
+git pull
 export STREAMFLIX_ROOT=/opt/streamflix/streamflix
 
 node procesar_solicitudes.js --dry-run   # qué haría, sin tocar nada
