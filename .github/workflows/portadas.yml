@@ -1,0 +1,83 @@
+name: Actualizar portadas del catálogo
+
+# A mano y solo a mano: esto escribe en la base de producción, así que no puede
+# colgar de un push. Por defecto simula y no toca nada.
+on:
+  workflow_dispatch:
+    inputs:
+      aplicar:
+        description: 'Escribir en la base. Sin marcar solo simula.'
+        type: boolean
+        default: false
+      tipos:
+        description: 'Tipos de contenido (movie, series, anime)'
+        type: string
+        default: 'movie,series,anime'
+      con_desfase_de_anio:
+        description: 'Incluir las fichas cuyo año no cuadra (revisa antes la simulación)'
+        type: boolean
+        default: false
+
+# Dos ejecuciones a la vez sobre la misma base no acaban bien.
+concurrency:
+  group: portadas-servidor
+  cancel-in-progress: false
+
+jobs:
+  portadas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Preparar acceso SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: Ejecutar el script en el servidor
+        env:
+          APLICAR: ${{ inputs.aplicar }}
+          TIPOS: ${{ inputs.tipos }}
+          CON_DESFASE: ${{ inputs.con_desfase_de_anio }}
+        run: |
+          set -euo pipefail
+
+          # --respaldo solo tiene sentido escribiendo; en simulación no hay nada
+          # que revertir. El fichero se deja fechado en el servidor.
+          OPCIONES="--type=$TIPOS"
+          if [ "$APLICAR" = "true" ]; then
+            OPCIONES="$OPCIONES --apply --respaldo=/tmp/portadas-respaldo.sql"
+          fi
+          if [ "$CON_DESFASE" = "true" ]; then
+            OPCIONES="$OPCIONES --con-desfase-de-ano"
+          fi
+
+          echo "Opciones: $OPCIONES"
+
+          # -T porque no hay terminal: sin él, docker compose exec falla aquí.
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "cd /opt/streamflix/streamflix && \
+             docker compose -f docker-compose.prod.yml exec -T app \
+               node server/db/update-posters.js $OPCIONES"
+
+      - name: Recoger el respaldo
+        # Aunque el paso anterior falle: si se cortó a mitad, el respaldo es
+        # justamente lo que hace falta para deshacer lo que sí llegó a escribirse.
+        if: ${{ always() && inputs.aplicar }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "cd /opt/streamflix/streamflix && \
+             docker compose -f docker-compose.prod.yml exec -T app \
+               sh -c 'cat /tmp/portadas-respaldo.sql 2>/dev/null || true'" > respaldo-portadas.sql
+          echo "Líneas de vuelta atrás: $(grep -c '^UPDATE' respaldo-portadas.sql || echo 0)"
+
+      - name: Guardar el respaldo como artefacto
+        if: ${{ always() && inputs.aplicar }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: respaldo-portadas
+          path: respaldo-portadas.sql
+          if-no-files-found: warn
+          retention-days: 90

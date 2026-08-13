@@ -64,6 +64,37 @@ docker compose -f docker-compose.prod.yml exec app node server/db/backfill-seaso
 Es idempotente: se puede repetir. Las temporadas que avise como «sin origen» son
 las que no tienen snapshots en la base y sí hay que volver a importar.
 
+## 2.2 Portadas del catálogo
+
+Las portadas que trae el importador son las de la página de origen: miniaturas
+pequeñas y en dominios que rotan. `update-posters.js` las cambia por las de
+AniList (anime) y TMDB (cine y series). Ver el README principal para el detalle.
+
+Lo cómodo es la acción **«Actualizar portadas del catálogo»** en la pestaña
+Actions del repositorio: usa los mismos secretos que el despliegue, así que no
+hace falta entrar al servidor. Por defecto **simula y no escribe nada** — hay que
+marcar `aplicar` a propósito.
+
+Conviene lanzarla dos veces: la primera sin `aplicar`, para leer el informe, y la
+segunda marcándolo. En el informe importa la lista final: son las fichas cuyo año
+no cuadra con el del catálogo de origen, que casi siempre es otra cosa con el
+mismo nombre (una temporada de una franquicia, o un concurso derivado de una
+serie). Esas se omiten a propósito; si la ficha es la correcta, se repite
+marcando también `con_desfase_de_anio`.
+
+Cuando escribe, deja la vuelta atrás en `/tmp/portadas-respaldo.sql` dentro del
+contenedor y la sube como artefacto `respaldo-portadas` de la ejecución. Para
+deshacer, ese fichero se pasa tal cual a la base.
+
+A mano, si se prefiere:
+
+```bash
+cd /opt/streamflix/streamflix
+docker compose -f docker-compose.prod.yml exec -T app node server/db/update-posters.js
+docker compose -f docker-compose.prod.yml exec -T app \
+  node server/db/update-posters.js --apply --respaldo=/tmp/portadas-respaldo.sql
+```
+
 ## 3. Importador
 
 El bot no es un servicio: se ejecuta a demanda. Necesita Node en el host y

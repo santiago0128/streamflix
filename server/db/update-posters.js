@@ -26,6 +26,7 @@
  */
 
 require('dotenv').config();
+const fs = require('fs');
 const https = require('https');
 const { sql, getPool } = require('../db');
 const { TMDB_BASE_URL, findTmdbMatch, requestText } = require('./tmdb');
@@ -43,12 +44,13 @@ const CDN_BUENOS = /(^|\.)(tmdb\.org|kitsu\.io|kitsu\.app|anilist\.co|anili\.st)
 const TIPOS = ['movie', 'series', 'anime'];
 
 function parseArgs(argv) {
-  const args = { apply: false, force: false, ids: null, types: TIPOS, conDesfase: false };
+  const args = { apply: false, force: false, ids: null, types: TIPOS, conDesfase: false, respaldo: null };
 
   for (const token of argv) {
     if (token === '--apply') args.apply = true;
     else if (token === '--force') args.force = true;
     else if (token === '--con-desfase-de-año' || token === '--con-desfase-de-ano') args.conDesfase = true;
+    else if (token.startsWith('--respaldo=')) args.respaldo = token.slice('--respaldo='.length).trim();
     else if (token.startsWith('--type=')) {
       args.types = token
         .slice('--type='.length)
@@ -202,6 +204,27 @@ async function resolvePoster(series) {
 
 const kb = (bytes) => (bytes ? `${Math.round(bytes / 1024)} KB` : '?');
 
+/**
+ * Deja la vuelta atrás de una fila antes de tocarla.
+ *
+ * Se va añadiendo fila a fila en vez de volcarlo todo al principio para que el
+ * fichero valga también si el recorrido se corta a medias: contiene exactamente
+ * lo que se cambió, ni más ni menos.
+ */
+function anotarRespaldo(ruta, series) {
+  if (!fs.existsSync(ruta)) {
+    fs.writeFileSync(ruta,
+      '-- Vuelta atrás de las portadas. Ejecutar contra la misma base.\n' +
+      `-- Generado: ${new Date().toISOString()}\n\n`);
+  }
+  const anterior = series.PosterUrl === null || series.PosterUrl === undefined
+    ? 'NULL'
+    : `'${String(series.PosterUrl).replace(/'/g, "''")}'`;
+  fs.appendFileSync(ruta,
+    `UPDATE dbo.Series SET PosterUrl = ${anterior} WHERE Id = ${series.Id};` +
+    `  -- [${series.ContentType}] ${String(series.Title).replace(/[\r\n]+/g, ' ')}\n`);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const pool = await getPool();
@@ -260,6 +283,10 @@ async function main() {
       }
 
       if (args.apply) {
+        // El respaldo se escribe antes que la fila, no después: si la escritura
+        // falla a mitad del recorrido, lo ya cambiado sigue teniendo su vuelta
+        // atrás en el fichero.
+        if (args.respaldo) anotarRespaldo(args.respaldo, series);
         await pool
           .request()
           .input('id', sql.Int, series.Id)

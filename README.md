@@ -83,7 +83,12 @@ npm run db:posters -- --apply         # escribe la base
 npm run db:posters -- --type=anime    # solo un tipo (movie, series, anime)
 npm run db:posters -- --ids=4,6       # solo esas fichas
 npm run db:posters -- --force         # rehace también las ya migradas
+npm run db:posters -- --apply --respaldo=vuelta.sql   # deja cómo deshacerlo
 ```
+
+`--respaldo` escribe un `UPDATE` por cada fila **antes** de tocarla, así que el
+fichero sirve aunque el recorrido se corte a la mitad: contiene exactamente lo
+que se cambió. Para deshacer, se ejecuta contra la misma base.
 
 El anime va primero a AniList porque guarda el título en romaji, en inglés y en
 japonés, que es por donde vienen los títulos del catálogo («Shingeki no Kyojin
