@@ -27,10 +27,10 @@
 
 require('dotenv').config();
 const fs = require('fs');
-const https = require('https');
 const { sql, getPool } = require('../db');
 const { TMDB_BASE_URL, findTmdbMatch, requestText } = require('./tmdb');
 const { fetchAnimeArtwork } = require('./anilist');
+const { imagenViva } = require('../lib/imagen');
 
 // 500 px de ancho: la ficha de detalle es la que más la agranda y ahí ya se ve
 // nítida, sin irse a los 200 KB de w780 en una parrilla de decenas de portadas.
@@ -44,12 +44,13 @@ const CDN_BUENOS = /(^|\.)(tmdb\.org|kitsu\.io|kitsu\.app|anilist\.co|anili\.st)
 const TIPOS = ['movie', 'series', 'anime'];
 
 function parseArgs(argv) {
-  const args = { apply: false, force: false, ids: null, types: TIPOS, conDesfase: false, respaldo: null };
+  const args = { apply: false, force: false, ids: null, types: TIPOS, conDesfase: false, respaldo: null, revisar: false };
 
   for (const token of argv) {
     if (token === '--apply') args.apply = true;
     else if (token === '--force') args.force = true;
     else if (token === '--con-desfase-de-año' || token === '--con-desfase-de-ano') args.conDesfase = true;
+    else if (token === '--revisar') args.revisar = true;
     else if (token.startsWith('--respaldo=')) args.respaldo = token.slice('--respaldo='.length).trim();
     else if (token.startsWith('--type=')) {
       args.types = token
@@ -105,22 +106,7 @@ function extractPosterFile(html) {
 }
 
 /** Comprueba que la portada existe antes de guardarla: un 404 en la base es peor que la miniatura vieja. */
-function checkImage(url) {
-  return new Promise((resolve) => {
-    const req = https.request(url, { method: 'HEAD', timeout: 15000 }, (res) => {
-      res.resume();
-      const type = String(res.headers['content-type'] || '');
-      resolve({
-        ok: res.statusCode === 200 && type.startsWith('image/'),
-        status: res.statusCode,
-        bytes: Number(res.headers['content-length']) || 0
-      });
-    });
-    req.on('timeout', () => { req.destroy(); resolve({ ok: false, status: 0, bytes: 0 }); });
-    req.on('error', () => resolve({ ok: false, status: 0, bytes: 0 }));
-    req.end();
-  });
-}
+const checkImage = (url) => imagenViva(url);
 
 /** Portada de TMDB, para películas y series (y como respaldo del anime). */
 async function resolveFromTmdb(series) {
@@ -246,7 +232,28 @@ async function main() {
       ORDER BY ContentType, Id
     `);
 
-    const rows = result.recordset.filter((series) => args.force || !yaEsBuena(series.PosterUrl));
+    // Sin --revisar se decide por el origen de la URL, que es rápido pero solo
+    // ve de dónde viene la imagen, no si sigue ahí. --revisar la pide una por
+    // una: es lo que destapa las portadas que dan 404 aunque el dominio parezca
+    // bueno, que de otro modo no se rehacen nunca.
+    let muertas = new Set();
+    if (args.revisar) {
+      const candidatas = result.recordset.filter((s) => yaEsBuena(s.PosterUrl));
+      if (candidatas.length) {
+        console.log(`Revisando ${candidatas.length} portada(s) que ya estaban en un CDN bueno...`);
+        for (const series of candidatas) {
+          const estado = await imagenViva(series.PosterUrl);
+          if (!estado.ok) {
+            muertas.add(series.Id);
+            console.log(`  rota: #${series.Id} ${series.Title} (${estado.status || estado.motivo || 'sin respuesta'})`);
+          }
+        }
+        console.log(muertas.size ? `${muertas.size} rota(s).\n` : 'Ninguna rota.\n');
+      }
+    }
+
+    const rows = result.recordset.filter((series) =>
+      args.force || muertas.has(series.Id) || !yaEsBuena(series.PosterUrl));
     const yaMigradas = result.recordset.length - rows.length;
     const etiquetaTipos = args.types.join(', ');
 

@@ -83,8 +83,20 @@ npm run db:posters -- --apply         # escribe la base
 npm run db:posters -- --type=anime    # solo un tipo (movie, series, anime)
 npm run db:posters -- --ids=4,6       # solo esas fichas
 npm run db:posters -- --force         # rehace también las ya migradas
+npm run db:posters -- --revisar       # además, busca portadas que den 404
 npm run db:posters -- --apply --respaldo=vuelta.sql   # deja cómo deshacerlo
 ```
+
+`--revisar` pide cada portada que ya estaba en un CDN bueno y rehace las que no
+respondan. Sin él la decisión es solo por el dominio de la URL, que es rápido
+pero solo dice de dónde viene la imagen, no si sigue ahí: una portada de TMDB
+que muera no se rehace nunca. Es lo que conviene en una tarea periódica.
+
+La comprobación **reintenta antes de dar una imagen por muerta**. Pedir el
+catálogo entero de una tirada hace que el CDN corte la conexión, y con un solo
+intento aparecen como rotas imágenes que responden 200 las tres veces si se
+piden de una en una. Reemplazar una portada buena por ese motivo es peor que el
+problema que se quería arreglar.
 
 `--respaldo` escribe un `UPDATE` por cada fila **antes** de tocarla, así que el
 fichero sirve aunque el recorrido se corte a la mitad: contiene exactamente lo

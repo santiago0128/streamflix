@@ -26,6 +26,25 @@
 require('dotenv').config();
 const https = require('https');
 const { sql, getPool } = require('../db');
+const { imagenViva } = require('../lib/imagen');
+
+/**
+ * Primera de las URLs que responda de verdad, o null si ninguna.
+ *
+ * Kitsu publica varios tamaños de cada imagen y no todos existen en todas las
+ * fichas: guardar el primero de la lista sin mirar es cómo entran las portadas
+ * que dan 404, y eso no se descubre hasta que alguien abre la ficha en la web.
+ */
+async function primeraImagenViva(candidatas, etiqueta) {
+  const urls = candidatas.filter(Boolean);
+  for (const url of urls) {
+    const estado = await imagenViva(url);
+    if (estado.ok) return url;
+    console.log(`  ⚠ ${etiqueta} descartada (${estado.status || estado.motivo}): ${url}`);
+  }
+  if (urls.length) console.log(`  ⚠ ninguna ${etiqueta} de Kitsu responde; se queda sin ella`);
+  return null;
+}
 
 const DEFAULT_ANIME = '3936'; // Fullmetal Alchemist: Brotherhood
 
@@ -155,7 +174,7 @@ function scanMediaDir(dir) {
 }
 
 /** Ficha de lo que se va a importar, para revisar antes de escribir en la base. */
-function printCandidate(anime, at, episodes, genreNames, videoMode) {
+function printCandidate(anime, at, episodes, genreNames, videoMode, portadaElegida) {
   const t = at.titles || {};
   const line = '─'.repeat(64);
   console.log(`\n${line}`);
@@ -170,7 +189,10 @@ function printCandidate(anime, at, episodes, genreNames, videoMode) {
   console.log(`  Duración por ep ... ${at.episodeLength ? at.episodeLength + ' min' : '?'}`);
   console.log(`  Puntuación ........ ${at.averageRating || '?'} / 100`);
   console.log(`  Géneros ........... ${genreNames.join(', ') || '(ninguno)'}`);
-  console.log(`  Portada ........... ${(at.posterImage && at.posterImage.original) || '(sin portada)'}`);
+  // La que se va a guardar, que no siempre es el "original" de Kitsu: si ese no
+  // responde se cae al siguiente tamaño, y la ficha debe enseñar lo que de
+  // verdad se escribe.
+  console.log(`  Portada ........... ${portadaElegida || '(sin portada)'}`);
   console.log(line);
   if (videoMode.kind === 'placeholder') {
     console.log(`  ⚠️  VIDEO DE RELLENO — no es la serie`);
@@ -269,8 +291,19 @@ async function importAnime(arg, opts) {
   const title = at.titles.en || at.canonicalTitle || at.titles.en_jp;
   const description =
     DESCRIPTION_OVERRIDES[anime.id] || stripHtml(at.description || at.synopsis);
-  const poster = (at.posterImage && (at.posterImage.original || at.posterImage.large)) || null;
-  const backdrop = (at.coverImage && (at.coverImage.large || at.coverImage.original)) || null;
+  // Kitsu ofrece varios tamaños de cada imagen y no todos existen siempre: hay
+  // fichas cuyo "original" da 404 aunque el "large" esté bien. Se elige el
+  // primero que responda de verdad, en vez de dar por buena la primera URL que
+  // aparezca — una portada rota no se nota hasta que alguien abre la ficha.
+  const poster = await primeraImagenViva(
+    [at.posterImage && at.posterImage.original, at.posterImage && at.posterImage.large,
+     at.posterImage && at.posterImage.medium],
+    'portada'
+  );
+  const backdrop = await primeraImagenViva(
+    [at.coverImage && at.coverImage.large, at.coverImage && at.coverImage.original],
+    'banner'
+  );
   const year = at.startDate ? Number(at.startDate.slice(0, 4)) : null;
   // Kitsu puntúa sobre 100; la tabla guarda sobre 10.
   const rating = at.averageRating ? Math.round(Number(at.averageRating)) / 10 : null;
@@ -285,7 +318,7 @@ async function importAnime(arg, opts) {
   if (!episodes.length) throw new Error('Kitsu no devolvió episodios para esta serie');
 
   // ---- Capa de verificación: mostrar qué se encontró y confirmar ----
-  printCandidate(anime, at, episodes, genreNames, opts.videoMode);
+  printCandidate(anime, at, episodes, genreNames, opts.videoMode, poster);
 
   if (opts.dryRun) {
     console.log('🔎 --dry-run: no se escribió nada en la base.');
