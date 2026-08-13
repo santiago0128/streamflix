@@ -125,6 +125,26 @@ temporada. Las lista al final con el enlace a la ficha para revisarlas:
 - si el año de la base está mal, corrígelo y repite con `--ids=<id>`;
 - si la ficha es la correcta, repite con `--con-desfase-de-año`.
 
+## Bienvenida
+
+Al entrar sale un modal que explica las dos cosas que no se descubren solas: que
+se puede **pedir** contenido que falte, y que hay un botón de **donar** para el
+servidor. Cada bloque dice también lo que *no* promete —ni plazos ni ventajas por
+donar—, que es lo que evita la queja después.
+
+Sale **una vez por visita**, no en cada carga: se recuerda en `sessionStorage`,
+así que vuelve a aparecer la próxima vez que alguien entre, pero no al recargar
+ni al volver atrás en mitad de una sesión, que es lo que convierte un aviso en
+una molestia. La casilla «No volver a mostrar» se guarda en `localStorage` y
+manda sobre lo anterior.
+
+El bloque de donaciones solo aparece si hay donaciones configuradas, y el modal
+no sale al volver de Mercado Pago: ahí ya hay un agradecimiento, y volver a pedir
+justo después de que alguien haya dado sobra.
+
+Para que salga literalmente en cada carga, basta con quitar la comprobación de
+`sessionStorage` en `mostrarBienvenida()` ([public/js/app.js](public/js/app.js)).
+
 ## Solicitar contenido
 
 El enlace **Solicitar** de la barra superior abre un formulario para pedir un

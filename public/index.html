@@ -299,6 +299,63 @@
     </div>
   </div>
 
+  <!-- ===================== MODAL DE BIENVENIDA ===================== -->
+  <div class="modal" id="welcomeModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card welcome-card">
+      <button class="modal-close" data-close aria-label="Cerrar">✕</button>
+      <h2>Bienvenido a <span class="welcome-brand">NOX<span>IS</span></span></h2>
+      <p class="welcome-intro">
+        Un catálogo de anime, series y películas mantenido a mano. Dos cosas que
+        conviene saber antes de empezar:
+      </p>
+
+      <div class="welcome-item">
+        <div class="welcome-icon">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+        </div>
+        <div class="welcome-text">
+          <h3>¿Falta algo? Pídelo</h3>
+          <p>
+            El catálogo no está completo y nunca lo estará del todo: cada título
+            hay que traerlo uno a uno. Si echas algo en falta, dilo desde
+            <strong>Solicitar</strong> y se valora para importarlo. Necesitas una
+            cuenta, y desde ahí ves en qué estado va lo que pediste.
+          </p>
+          <p class="welcome-note">Sin plazos prometidos — a veces es rápido y a veces no llega.</p>
+        </div>
+      </div>
+
+      <div class="welcome-item" id="welcomeDonate" hidden>
+        <div class="welcome-icon welcome-icon-heart">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+            <path d="M12 21s-7.5-4.7-9.3-9A5.3 5.3 0 0 1 12 6.6 5.3 5.3 0 0 1 21.3 12c-1.8 4.3-9.3 9-9.3 9z"/>
+          </svg>
+        </div>
+        <div class="welcome-text">
+          <h3>El servidor lo paga alguien</h3>
+          <p>
+            Esto corre en una máquina que cuesta dinero todos los meses. Si te
+            resulta útil y quieres ayudar, hay un botón de <strong>Donar</strong>
+            arriba. El pago va por Mercado Pago.
+          </p>
+          <p class="welcome-note">Es voluntario: sin donar, todo funciona exactamente igual.</p>
+        </div>
+      </div>
+
+      <div class="welcome-actions">
+        <button class="btn btn-primary" id="welcomeStart">Empezar a ver</button>
+        <button class="btn btn-secondary" id="welcomeRequest">Solicitar contenido</button>
+      </div>
+      <label class="welcome-skip">
+        <input type="checkbox" id="welcomeSkip" /> No volver a mostrar esto
+      </label>
+    </div>
+  </div>
+
   <!-- ===================== MODAL SOLICITAR CONTENIDO ===================== -->
   <div class="modal" id="requestModal" hidden>
     <div class="modal-backdrop" data-close></div>

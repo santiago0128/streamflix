@@ -1228,6 +1228,10 @@
     }
     if (!config.enabled) return;
 
+    // El bloque de donaciones de la bienvenida solo se enseña si de verdad hay
+    // dónde donar.
+    $('welcomeDonate').hidden = false;
+
     donacion = { min: Number(config.min) || 1, max: Number(config.max) || 1000000 };
     $('donateCurrency').textContent = config.currency ? `(${config.currency})` : '';
     $('donateBtn').hidden = false;
@@ -1307,12 +1311,54 @@
     window.history.replaceState({}, '', limpia.pathname + limpia.search + limpia.hash);
   }
 
+  // ===================== BIENVENIDA =====================
+  const welcomeModal = $('welcomeModal');
+  const WELCOME_SKIP_KEY = 'streamflix_welcome_skip';
+  const WELCOME_SEEN_KEY = 'streamflix_welcome_seen';
+
+  /**
+   * Una vez por visita, no en cada carga.
+   *
+   * sessionStorage y no localStorage: así vuelve a salir la próxima vez que
+   * alguien entra, pero no cada vez que recarga o vuelve atrás en mitad de una
+   * sesión, que es lo que convierte un aviso en una molestia. Quien no lo quiera
+   * ver más lo dice con la casilla, y eso sí se recuerda entre sesiones.
+   */
+  function mostrarBienvenida() {
+    if (localStorage.getItem(WELCOME_SKIP_KEY) === '1') return;
+    try {
+      if (sessionStorage.getItem(WELCOME_SEEN_KEY) === '1') return;
+      sessionStorage.setItem(WELCOME_SEEN_KEY, '1');
+    } catch {
+      /* navegación privada sin almacenamiento: se enseña y ya */
+    }
+    // Al volver de Mercado Pago no: ahí ya hay un aviso de agradecimiento, y
+    // pedir dinero justo después de que alguien acabe de darlo sobra.
+    if (new URLSearchParams(window.location.search).get('donacion')) return;
+    openModal(welcomeModal);
+  }
+
+  $('welcomeSkip').addEventListener('change', (event) => {
+    if (event.target.checked) localStorage.setItem(WELCOME_SKIP_KEY, '1');
+    else localStorage.removeItem(WELCOME_SKIP_KEY);
+  });
+
+  $('welcomeStart').addEventListener('click', () => closeModal(welcomeModal));
+  $('welcomeRequest').addEventListener('click', () => {
+    closeModal(welcomeModal);
+    openRequest();
+  });
+
   async function init() {
     refreshAuthUI();
     avisarVueltaDeDonacion();
     await Promise.all([loadGenres(), refreshMyListIds(), refreshContinueWatching(true)]);
     render();
-    initDonations();   // no bloquea al catálogo: si tarda, el botón aparece después
+    // La bienvenida espera a saber si hay donaciones: su segundo bloque habla de
+    // un botón que puede no existir, y prometer algo que no está es peor que
+    // callarlo. Si la consulta falla, sale igual pero solo con lo de solicitar.
+    await initDonations();
+    mostrarBienvenida();
   }
 
   init();

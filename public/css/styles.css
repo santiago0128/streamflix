@@ -920,3 +920,42 @@ body { max-width: 100%; }
   .btn-donate { padding: 8px 11px; }
   .btn-donate .btn-donate-text { display: none; }
 }
+
+/* ===================== MODAL DE BIENVENIDA ===================== */
+.welcome-card { max-width: 520px; padding: 34px 30px 26px; }
+.welcome-card h2 { margin-bottom: 10px; font-size: 26px; }
+.welcome-brand { font-weight: 900; letter-spacing: -.06em; text-transform: uppercase; }
+.welcome-brand span { color: var(--accent-soft); }
+.welcome-intro { color: var(--muted); font-size: 14px; line-height: 1.55; margin-bottom: 22px; }
+
+.welcome-item { display: flex; gap: 14px; margin-bottom: 20px; }
+.welcome-icon {
+  flex: none; width: 38px; height: 38px; border-radius: 10px;
+  display: grid; place-items: center;
+  background: rgba(139, 61, 255, .16); color: var(--accent-soft);
+  border: 1px solid rgba(197, 155, 255, .22);
+}
+.welcome-icon-heart { color: #ff7ba8; background: rgba(255, 123, 168, .13); border-color: rgba(255, 123, 168, .24); }
+.welcome-text { flex: 1; min-width: 0; }
+.welcome-text h3 { font-size: 15px; margin-bottom: 5px; }
+.welcome-text p { font-size: 13.5px; line-height: 1.55; color: #d6d6dd; }
+.welcome-text strong { color: var(--text); font-weight: 700; }
+/* El matiz que evita la queja después: qué NO promete cada cosa. */
+.welcome-note { margin-top: 5px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+
+.welcome-actions {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border);
+}
+.welcome-actions .btn { flex: 1; min-width: 150px; }
+.welcome-skip {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-top: 14px; font-size: 12.5px; color: var(--muted); cursor: pointer;
+}
+.welcome-skip input { accent-color: var(--accent); cursor: pointer; }
+
+@media (max-width: 560px) {
+  .welcome-card { padding: 28px 20px 22px; }
+  .welcome-card h2 { font-size: 22px; }
+  .welcome-actions .btn { min-width: 100%; }
+}
