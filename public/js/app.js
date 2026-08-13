@@ -1126,6 +1126,15 @@
       meta.textContent = `${ETIQUETA_TIPO[s.ContentType] || s.ContentType} · ${new Date(s.CreatedAt).toLocaleDateString()}`;
       main.append(titulo, meta);
 
+      // El motivo lo escribe el worker cuando la importación no sale. Antes
+      // solo se veía "rechazada" y había que preguntar por qué.
+      if (s.ResultNote) {
+        const motivo = document.createElement('div');
+        motivo.className = 'request-row-note';
+        motivo.textContent = s.ResultNote;   // textContent: viene de la fuente, no es HTML
+        main.appendChild(motivo);
+      }
+
       const estado = document.createElement('span');
       estado.className = 'request-status';
       estado.dataset.status = s.Status;

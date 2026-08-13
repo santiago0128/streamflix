@@ -887,6 +887,13 @@ body { max-width: 100%; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .request-row-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+/* El motivo sí se lee entero: es una explicación, no una etiqueta, y cortarla
+   con puntos suspensivos la deja inservible. */
+.request-row-note {
+  font-size: 12px; line-height: 1.45; color: var(--muted);
+  margin-top: 6px; padding-left: 9px;
+  border-left: 2px solid rgba(255, 255, 255, .16);
+}
 /* El estado es lo que se busca de un vistazo, así que va en color y no en texto suelto. */
 .request-status {
   flex: none; font-size: 11px; font-weight: 700; text-transform: uppercase;

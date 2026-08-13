@@ -181,6 +181,14 @@ CREATE TABLE dbo.ContentRequests (
     CONSTRAINT CK_ContentRequests_Status CHECK (Status IN ('pendiente', 'en curso', 'listo', 'rechazada'))
 );
 
+-- Por qué quedó como quedó, en cristiano y para enseñárselo a quien la pidió.
+-- Sin esto, una solicitud rechazada solo decía "rechazada": el motivo se iba en
+-- un mensaje de Telegram que ve el administrador y nadie más, así que quien la
+-- pidió no sabía si su título no existe, si se llama de otra forma o si falló
+-- algo pasajero que merece reintento.
+IF COL_LENGTH('dbo.ContentRequests', 'ResultNote') IS NULL
+    ALTER TABLE dbo.ContentRequests ADD ResultNote NVARCHAR(500) NULL;
+
 -- La cola se lee por estado y por fecha; y de un usuario, lo suyo.
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ContentRequests_Status' AND object_id = OBJECT_ID('dbo.ContentRequests'))
     CREATE INDEX IX_ContentRequests_Status ON dbo.ContentRequests (Status, CreatedAt DESC);

@@ -66,13 +66,14 @@ jobs:
               echo "::warning::No pude actualizar el bot (¿cambios locales o rama divergida en el servidor?). Sigo con la versión instalada."
             fi
           else
-            echo "-----------------------------------------------------------"
-            echo "/opt/streamflix/jk-anime-launcher no es un clon de git, así"
-            echo "que no puedo actualizarlo desde aquí. Opciones:"
-            echo "  · clonarlo:  git clone git@github.com:santiago0128/jk-anime-launcher.git"
-            echo "  · o copiar procesar_solicitudes.js a mano y relanzar esto."
-            echo "-----------------------------------------------------------"
-            exit 1
+            # Tampoco aquí se aborta. Este `exit 1` tenía sentido cuando el
+            # worker aún no estaba en el servidor, pero con el bot ya instalado
+            # convertía "no puedo actualizar" en "no atiendo nada": el paso
+            # moría, el de la cola no llegaba a ejecutarse y las solicitudes se
+            # quedaban en 'pendiente' para siempre sin que nadie se enterara.
+            echo "::warning::/opt/streamflix/jk-anime-launcher no es un clon de git: no puedo actualizarlo. Atiendo la cola con la versión instalada."
+            echo "Para que vuelva a actualizarse solo:"
+            echo "  git clone git@github.com:santiago0128/jk-anime-launcher.git"
           fi
 
           # El worker no añade dependencias nuevas, pero un git pull sí puede
@@ -100,9 +101,30 @@ jobs:
 
           echo "Opciones: ${OPCIONES:-(ninguna: atiende la cola entera)}"
 
+          # Dentro de la imagen del bot, igual que los cron de vigilar_emision y
+          # auto_fix_links. Antes se ejecutaba con el `node` del host y no
+          # llegaba a arrancar: una sesión SSH no interactiva coge
+          # /usr/bin/node, que aquí es la v12, y el driver de SQL Server usa
+          # `??`, que es de la v14 para arriba. El worker moría con un
+          # SyntaxError antes de leer la cola, así que ninguna solicitud se
+          # atendió nunca. El node bueno está en nvm, pero eso solo lo ve una
+          # shell de login: el contenedor no depende de con qué shell se entre.
+          #
+          # TMPDIR apunta a un directorio del host porque ahí vive el cerrojo
+          # que impide dos importaciones a la vez. En el /tmp del contenedor,
+          # que nace y muere con él, no protegería de nada.
+          #
           # JK_NO_BROWSER porque en un servidor no hay navegador que abrir.
           ssh -i ~/.ssh/id_deploy -o BatchMode=yes \
             ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
-            "cd /opt/streamflix/jk-anime-launcher && \
-             STREAMFLIX_ROOT=/opt/streamflix/streamflix JK_NO_BROWSER=1 \
-             node procesar_solicitudes.js $OPCIONES"
+            "docker run --rm --network streamflix_default \
+               --add-host host.docker.internal:host-gateway \
+               -v /opt/streamflix/jk-anime-launcher:/bot \
+               -v /opt/streamflix/streamflix/.env:/streamflix/.env:ro \
+               -v /opt/streamflix/estado:/estado \
+               -e STREAMFLIX_ROOT=/streamflix \
+               -e STREAMFLIX_PROGRESS_FILE=/estado/progreso.json \
+               -e TMPDIR=/estado \
+               -e DB_SERVER=streamflix-sql -e DB_PORT=1433 \
+               -e JK_NO_BROWSER=1 \
+               -w /bot streamflix-bot procesar_solicitudes.js $OPCIONES"

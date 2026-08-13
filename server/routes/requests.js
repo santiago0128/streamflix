@@ -20,7 +20,7 @@ router.get('/', async (req, res) => {
     const pool = await getPool();
     const result = await pool.request()
       .input('userId', sql.Int, req.user.id)
-      .query(`SELECT Id, Title, ContentType, Notes, Status, CreatedAt
+      .query(`SELECT Id, Title, ContentType, Notes, Status, ResultNote, CreatedAt
                 FROM dbo.ContentRequests
                WHERE UserId = @userId
                ORDER BY CreatedAt DESC`);
