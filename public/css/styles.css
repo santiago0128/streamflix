@@ -842,3 +842,81 @@ html {
   overflow-x: clip;
 }
 body { max-width: 100%; }
+
+/* ===================== SOLICITAR Y DONAR ===================== */
+.nav-action { display: inline-flex; align-items: center; gap: 6px; }
+.nav-action svg { flex: none; }
+
+.btn-donate {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: transparent; color: var(--text);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 8px 15px; font-size: 14px; font-weight: 600;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.btn-donate svg { color: var(--accent); transition: transform .15s; }
+.btn-donate:hover { background: rgba(139, 61, 255, .14); border-color: var(--accent); }
+.btn-donate:hover svg { transform: scale(1.15); }
+
+/* Modal de solicitud */
+.request-card, .donate-card { max-width: 460px; padding: 34px 30px; }
+/* El reset quita el margen de todo, y la separación del título solo estaba
+   definida para .auth-card: sin esto el h2 se comía el párrafo de debajo. */
+.request-card h2, .donate-card h2 { margin-bottom: 10px; }
+.request-intro, .donate-intro {
+  color: var(--muted); font-size: 14px; line-height: 1.55; margin-bottom: 22px;
+}
+.field-hint { color: var(--muted); font-weight: 400; }
+.field select, .field textarea {
+  width: 100%; background: var(--card); border: 1px solid var(--border); color: var(--text);
+  padding: 11px 12px; border-radius: 8px; font-size: 15px; outline: none;
+  font-family: inherit;
+}
+.field textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
+.field select:focus, .field textarea:focus { border-color: var(--accent); }
+
+.request-mine { margin-top: 26px; border-top: 1px solid var(--border); padding-top: 18px; }
+.request-mine h3 { font-size: 15px; margin-bottom: 12px; }
+.request-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 9px; background: var(--card); margin-bottom: 8px;
+}
+.request-row-main { flex: 1; min-width: 0; }
+.request-row-title {
+  font-size: 14px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.request-row-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+/* El estado es lo que se busca de un vistazo, así que va en color y no en texto suelto. */
+.request-status {
+  flex: none; font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .03em; padding: 4px 9px; border-radius: 999px;
+}
+.request-status[data-status="pendiente"] { background: rgba(255, 211, 78, .16); color: #ffd34e; }
+.request-status[data-status="en curso"]  { background: rgba(139, 61, 255, .2);  color: var(--accent-soft); }
+.request-status[data-status="listo"]     { background: rgba(80, 220, 140, .16); color: #63dd97; }
+.request-status[data-status="rechazada"] { background: rgba(255, 107, 107, .14); color: #ff6b6b; }
+.request-drop {
+  flex: none; background: transparent; border: none; color: var(--muted);
+  font-size: 17px; line-height: 1; padding: 4px 6px; border-radius: 6px;
+}
+.request-drop:hover { color: #ff6b6b; background: rgba(255, 107, 107, .1); }
+.request-empty { color: var(--muted); font-size: 13px; }
+
+/* Importes sugeridos */
+.donate-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.donate-presets:empty { display: none; }
+.donate-preset {
+  background: var(--card); border: 1px solid var(--border); color: var(--text);
+  padding: 9px 15px; border-radius: 999px; font-size: 14px; font-weight: 600;
+  font-variant-numeric: tabular-nums; transition: border-color .15s, background .15s;
+}
+.donate-preset:hover { border-color: var(--accent); }
+.donate-preset.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.donate-legal { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 14px; text-align: center; }
+
+@media (max-width: 820px) {
+  /* En la barra estrecha el texto sobra: el corazón ya se entiende. */
+  .btn-donate { padding: 8px 11px; }
+  .btn-donate .btn-donate-text { display: none; }
+}

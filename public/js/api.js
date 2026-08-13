@@ -59,5 +59,12 @@ const API = (() => {
       method: 'PUT',
       body: { positionSec, durationSec }
     }),
+    myRequests: () => req('/requests'),
+    createRequest: (title, contentType, notes) =>
+      req('/requests', { method: 'POST', body: { title, contentType, notes } }),
+    cancelRequest: (id) => req('/requests/' + id, { method: 'DELETE' }),
+    donationConfig: () => req('/donations/config'),
+    donationPreference: (amount) =>
+      req('/donations/preference', { method: 'POST', body: { amount } }),
   };
 })();

@@ -18,6 +18,15 @@
         <a href="#" data-type="series">Series</a>
         <a href="#" data-type="movie">Películas</a>
         <a href="#" data-view="mylist" data-auth-only>Mi Lista</a>
+        <!-- Sin data-auth-only: si se esconde al visitante, nadie descubre que
+             se puede pedir contenido. Al pulsarlo sin sesión se ofrece entrar. -->
+        <a href="#" class="nav-action" id="requestLink">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          Solicitar
+        </a>
       </nav>
     </div>
     <div class="nav-icons">
@@ -41,6 +50,14 @@
           <option value="">Todos los géneros</option>
         </select>
       </div>
+      <!-- Oculto hasta que el servidor confirme que hay Mercado Pago detrás: un
+           botón de donar que lleva a un error es peor que no tenerlo. -->
+      <button class="btn btn-donate" id="donateBtn" hidden>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+          <path d="M12 21s-7.5-4.7-9.3-9A5.3 5.3 0 0 1 12 6.6 5.3 5.3 0 0 1 21.3 12c-1.8 4.3-9.3 9-9.3 9z"/>
+        </svg>
+        <span class="btn-donate-text">Donar</span>
+      </button>
       <div id="authArea" class="auth-area">
         <button class="btn btn-ghost" id="loginBtn">Iniciar sesión</button>
       </div>
@@ -278,6 +295,70 @@
       <p class="auth-switch">
         <span id="authSwitchText">¿No tienes cuenta?</span>
         <a href="#" id="authSwitchLink">Regístrate</a>
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL SOLICITAR CONTENIDO ===================== -->
+  <div class="modal" id="requestModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card request-card">
+      <button class="modal-close" data-close aria-label="Cerrar">✕</button>
+      <h2>Solicitar contenido</h2>
+      <p class="request-intro">
+        ¿Falta algo en el catálogo? Dinos qué es y lo valoramos para importarlo.
+        No prometemos plazos: cada título hay que traerlo a mano.
+      </p>
+      <form id="requestForm">
+        <div class="field">
+          <label for="requestTitle">Título</label>
+          <input type="text" id="requestTitle" maxlength="200" autocomplete="off"
+                 placeholder="Ej: Vinland Saga" />
+        </div>
+        <div class="field">
+          <label for="requestType">Tipo</label>
+          <select id="requestType">
+            <option value="anime">Anime</option>
+            <option value="series">Serie</option>
+            <option value="movie">Película</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="requestNotes">Detalles <span class="field-hint">(opcional)</span></label>
+          <textarea id="requestNotes" rows="3" maxlength="500"
+                    placeholder="Temporada concreta, idioma preferido, año..."></textarea>
+        </div>
+        <p class="auth-error" id="requestError" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block" id="requestSubmit">Enviar solicitud</button>
+      </form>
+      <div class="request-mine" id="requestMine" hidden>
+        <h3>Tus solicitudes</h3>
+        <div id="requestList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL DONACIONES ===================== -->
+  <div class="modal" id="donateModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card donate-card">
+      <button class="modal-close" data-close aria-label="Cerrar">✕</button>
+      <h2>Apoyar el proyecto</h2>
+      <p class="donate-intro">
+        Noxis se paga con un servidor que cuesta dinero todos los meses. Si te
+        resulta útil y quieres echar una mano, se agradece — pero no hace falta
+        para usarlo: todo sigue igual de gratis.
+      </p>
+      <div class="donate-presets" id="donatePresets"></div>
+      <div class="field">
+        <label for="donateAmount">Importe <span class="field-hint" id="donateCurrency"></span></label>
+        <input type="number" id="donateAmount" min="0" step="any" inputmode="decimal" placeholder="0" />
+      </div>
+      <p class="auth-error" id="donateError" hidden></p>
+      <button class="btn btn-primary btn-block" id="donateSubmit">Continuar a Mercado Pago</button>
+      <p class="donate-legal">
+        El pago se completa en Mercado Pago. Aquí no se guarda ningún dato de tu
+        tarjeta: este sitio no llega a verlos en ningún momento.
       </p>
     </div>
   </div>

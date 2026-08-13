@@ -1087,10 +1087,218 @@
     }
   }
 
+  // ===================== SOLICITAR CONTENIDO =====================
+  const requestModal = $('requestModal');
+
+  const ETIQUETA_TIPO = { anime: 'Anime', series: 'Serie', movie: 'Película' };
+
+  function requestError(msg) {
+    const el = $('requestError');
+    el.textContent = msg || '';
+    el.hidden = !msg;
+  }
+
+  function renderMyRequests(solicitudes) {
+    const caja = $('requestMine');
+    const lista = $('requestList');
+    caja.hidden = false;
+    lista.innerHTML = '';
+
+    if (!solicitudes.length) {
+      lista.innerHTML = '<p class="request-empty">Todavía no has pedido nada.</p>';
+      return;
+    }
+
+    for (const s of solicitudes) {
+      const fila = document.createElement('div');
+      fila.className = 'request-row';
+
+      const main = document.createElement('div');
+      main.className = 'request-row-main';
+      const titulo = document.createElement('div');
+      titulo.className = 'request-row-title';
+      titulo.textContent = s.Title;          // textContent: el título lo escribe el usuario
+      const meta = document.createElement('div');
+      meta.className = 'request-row-meta';
+      meta.textContent = `${ETIQUETA_TIPO[s.ContentType] || s.ContentType} · ${new Date(s.CreatedAt).toLocaleDateString()}`;
+      main.append(titulo, meta);
+
+      const estado = document.createElement('span');
+      estado.className = 'request-status';
+      estado.dataset.status = s.Status;
+      estado.textContent = s.Status;
+
+      fila.append(main, estado);
+
+      // Solo lo que sigue pendiente puede retirarse: lo demás ya se tocó.
+      if (s.Status === 'pendiente') {
+        const quitar = document.createElement('button');
+        quitar.className = 'request-drop';
+        quitar.type = 'button';
+        quitar.title = 'Retirar solicitud';
+        quitar.setAttribute('aria-label', `Retirar la solicitud de ${s.Title}`);
+        quitar.textContent = '✕';
+        quitar.addEventListener('click', async () => {
+          quitar.disabled = true;
+          try {
+            await API.cancelRequest(s.Id);
+            toast('Solicitud retirada');
+            loadMyRequests();
+          } catch (err) {
+            quitar.disabled = false;
+            toast(err.message);
+          }
+        });
+        fila.appendChild(quitar);
+      }
+
+      lista.appendChild(fila);
+    }
+  }
+
+  async function loadMyRequests() {
+    try {
+      renderMyRequests(await API.myRequests());
+    } catch {
+      $('requestMine').hidden = true;   // sin sesión o sin red: no es el asunto del modal
+    }
+  }
+
+  function openRequest() {
+    // Pedir contenido exige sesión, pero el enlace se ve siempre: si no se
+    // enseña, nadie descubre que esto existe.
+    if (!API.getUser()) {
+      toast('Inicia sesión para solicitar contenido');
+      openAuth('login');
+      return;
+    }
+    requestError('');
+    $('requestForm').reset();
+    openModal(requestModal);
+    loadMyRequests();
+  }
+
+  $('requestLink').addEventListener('click', (event) => {
+    event.preventDefault();
+    openRequest();
+  });
+
+  $('requestForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const boton = $('requestSubmit');
+    const title = $('requestTitle').value.trim();
+    const contentType = $('requestType').value;
+    const notes = $('requestNotes').value.trim();
+
+    if (title.length < 2) return requestError('Escribe el título de lo que quieres');
+
+    requestError('');
+    boton.disabled = true;
+    boton.textContent = 'Enviando...';
+    try {
+      await API.createRequest(title, contentType, notes);
+      $('requestForm').reset();
+      toast('Solicitud enviada');
+      loadMyRequests();
+    } catch (err) {
+      requestError(err.message);
+    } finally {
+      boton.disabled = false;
+      boton.textContent = 'Enviar solicitud';
+    }
+  });
+
+  // ===================== DONACIONES =====================
+  const donateModal = $('donateModal');
+  let donacion = { min: 1, max: 1000000 };
+
+  function donateError(msg) {
+    const el = $('donateError');
+    el.textContent = msg || '';
+    el.hidden = !msg;
+  }
+
+  /** El botón solo existe si el servidor tiene Mercado Pago configurado. */
+  async function initDonations() {
+    let config;
+    try {
+      config = await API.donationConfig();
+    } catch {
+      return;   // servidor viejo o sin la ruta: el botón se queda oculto
+    }
+    if (!config.enabled) return;
+
+    donacion = { min: Number(config.min) || 1, max: Number(config.max) || 1000000 };
+    $('donateCurrency').textContent = config.currency ? `(${config.currency})` : '';
+    $('donateBtn').hidden = false;
+
+    const caja = $('donatePresets');
+    caja.innerHTML = '';
+    for (const importe of config.presets || []) {
+      const boton = document.createElement('button');
+      boton.type = 'button';
+      boton.className = 'donate-preset';
+      boton.textContent = importe.toLocaleString();
+      boton.addEventListener('click', () => {
+        $('donateAmount').value = importe;
+        caja.querySelectorAll('.donate-preset').forEach((b) => b.classList.toggle('is-active', b === boton));
+        donateError('');
+      });
+      caja.appendChild(boton);
+    }
+
+    $('donateBtn').addEventListener('click', () => {
+      donateError('');
+      openModal(donateModal);
+    });
+
+    $('donateSubmit').addEventListener('click', async () => {
+      const boton = $('donateSubmit');
+      const amount = Number($('donateAmount').value);
+
+      if (!Number.isFinite(amount) || amount <= 0) return donateError('Escribe un importe');
+      if (amount < donacion.min || amount > donacion.max) {
+        return donateError(`El importe debe estar entre ${donacion.min.toLocaleString()} y ${donacion.max.toLocaleString()}`);
+      }
+
+      donateError('');
+      boton.disabled = true;
+      boton.textContent = 'Preparando el pago...';
+      try {
+        const { initPoint } = await API.donationPreference(amount);
+        // Misma pestaña: al volver de Mercado Pago, back_urls trae de vuelta
+        // aquí, y así el aviso de agradecimiento se ve donde toca.
+        window.location.href = initPoint;
+      } catch (err) {
+        donateError(err.message);
+        boton.disabled = false;
+        boton.textContent = 'Continuar a Mercado Pago';
+      }
+    });
+  }
+
+  /** Aviso al volver de Mercado Pago, según lo que diga back_urls. */
+  function avisarVueltaDeDonacion() {
+    const estado = new URLSearchParams(window.location.search).get('donacion');
+    if (!estado) return;
+    const mensajes = {
+      exito: '¡Gracias por el apoyo!',
+      pendiente: 'El pago quedó pendiente de confirmación',
+      fallo: 'El pago no se completó'
+    };
+    if (mensajes[estado]) toast(mensajes[estado]);
+    // Se limpia la URL para que al recargar no vuelva a saltar el aviso.
+    const limpia = new URL(window.location.href);
+    limpia.searchParams.delete('donacion');
+    window.history.replaceState({}, '', limpia.pathname + limpia.search + limpia.hash);
+  }
+
   async function init() {
     refreshAuthUI();
+    avisarVueltaDeDonacion();
     await Promise.all([loadGenres(), refreshMyListIds(), refreshContinueWatching(true)]);
     render();
+    initDonations();   // no bloquea al catálogo: si tarda, el botón aparece después
   }
 
   init();

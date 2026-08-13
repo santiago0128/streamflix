@@ -5,6 +5,10 @@ const cors = require('cors');
 const { getPool } = require('./db');
 
 const app = express();
+// Detrás del proxy inverso (ver deploy/README). Sin esto req.ip es siempre la
+// del proxy —y el freno por IP de las donaciones cuenta a todo el mundo junto—
+// y req.protocol dice http, que rompe las URLs de vuelta de Mercado Pago.
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
@@ -13,6 +17,8 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api', require('./routes/series'));
 app.use('/api/watchlist', require('./routes/watchlist'));
 app.use('/api/progress', require('./routes/progress'));
+app.use('/api/requests', require('./routes/requests'));
+app.use('/api/donations', require('./routes/donations'));
 
 // Marca de qué versión está corriendo. Permite confirmar desde fuera que un
 // despliegue llegó de verdad, sin tener que entrar al servidor.

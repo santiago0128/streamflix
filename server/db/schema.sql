@@ -163,3 +163,39 @@ CREATE TABLE dbo.WatchProgress (
     CONSTRAINT FK_WatchProgress_Users    FOREIGN KEY (UserId)    REFERENCES dbo.Users(Id)    ON DELETE CASCADE,
     CONSTRAINT FK_WatchProgress_Episodes FOREIGN KEY (EpisodeId) REFERENCES dbo.Episodes(Id) ON DELETE CASCADE
 );
+
+-- Solicitudes de contenido: lo que la gente pide que se importe.
+-- El estado lo mueve a mano quien atiende la cola; el importador vive en otro
+-- repositorio y no escribe aquí.
+IF OBJECT_ID('dbo.ContentRequests', 'U') IS NULL
+CREATE TABLE dbo.ContentRequests (
+    Id          INT IDENTITY(1,1) PRIMARY KEY,
+    UserId      INT NOT NULL,
+    Title       NVARCHAR(200) NOT NULL,
+    ContentType NVARCHAR(20)  NOT NULL,
+    Notes       NVARCHAR(500) NULL,
+    Status      NVARCHAR(20)  NOT NULL CONSTRAINT DF_ContentRequests_Status DEFAULT 'pendiente',
+    CreatedAt   DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_ContentRequests_Users FOREIGN KEY (UserId) REFERENCES dbo.Users(Id) ON DELETE CASCADE,
+    CONSTRAINT CK_ContentRequests_Type   CHECK (ContentType IN ('anime', 'series', 'movie')),
+    CONSTRAINT CK_ContentRequests_Status CHECK (Status IN ('pendiente', 'en curso', 'listo', 'rechazada'))
+);
+
+-- La cola se lee por estado y por fecha; y de un usuario, lo suyo.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ContentRequests_Status' AND object_id = OBJECT_ID('dbo.ContentRequests'))
+    CREATE INDEX IX_ContentRequests_Status ON dbo.ContentRequests (Status, CreatedAt DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ContentRequests_User' AND object_id = OBJECT_ID('dbo.ContentRequests'))
+    CREATE INDEX IX_ContentRequests_User ON dbo.ContentRequests (UserId, CreatedAt DESC);
+
+-- Un mismo usuario no puede tener dos veces el mismo título en cola. Filtrado
+-- por estado a propósito: si ya se atendió, pedirlo otra vez es legítimo.
+--
+-- OJO: un índice filtrado obliga a QUOTED_IDENTIFIER ON para cualquier INSERT,
+-- UPDATE o DELETE sobre la tabla. El driver de Node lo activa por su cuenta, así
+-- que la aplicación no se entera; sqlcmd no, y allí falla con un error que no
+-- menciona el índice. Al tocar esta tabla a mano hay que anteponer:
+--   SET QUOTED_IDENTIFIER ON;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UQ_ContentRequests_Pendiente' AND object_id = OBJECT_ID('dbo.ContentRequests'))
+    CREATE UNIQUE INDEX UQ_ContentRequests_Pendiente
+        ON dbo.ContentRequests (UserId, Title)
+        WHERE Status = 'pendiente';

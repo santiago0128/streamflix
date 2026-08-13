@@ -113,6 +113,48 @@ temporada. Las lista al final con el enlace a la ficha para revisarlas:
 - si el año de la base está mal, corrígelo y repite con `--ids=<id>`;
 - si la ficha es la correcta, repite con `--con-desfase-de-año`.
 
+## Solicitar contenido
+
+El enlace **Solicitar** de la barra superior abre un formulario para pedir un
+título que no esté en el catálogo. Se guarda en `dbo.ContentRequests` y, si el
+bot está configurado, avisa por Telegram con el título, el tipo y quién lo pidió.
+
+Exige sesión, para saber de quién viene cada petición, pero el enlace se ve
+también sin ella: si se escondiera, nadie descubriría que la función existe. Al
+pulsarlo sin sesión se ofrece entrar.
+
+Cada persona ve las suyas con su estado y puede retirar las que sigan
+pendientes. Los frenos son dos: **5 pendientes por cuenta** y un índice único que
+impide pedir dos veces el mismo título mientras el primero siga en cola.
+
+El estado (`pendiente`, `en curso`, `listo`, `rechazada`) se mueve a mano en la
+base — el importador vive en otro repositorio y no escribe aquí:
+
+```sql
+SET QUOTED_IDENTIFIER ON;   -- obligatorio: la tabla tiene un índice filtrado
+UPDATE dbo.ContentRequests SET Status = 'listo' WHERE Id = 12;
+```
+
+## Donaciones
+
+El botón **Donar** usa Checkout Pro de Mercado Pago. El servidor crea la
+preferencia de pago con `MP_ACCESS_TOKEN` y devuelve el enlace al que se manda al
+donante; los datos de la tarjeta nunca pasan por aquí.
+
+**Sin `MP_ACCESS_TOKEN` el botón no aparece**: la web pregunta primero a
+`/api/donations/config`, para no enseñar un botón que lleva a un error. Los
+importes sugeridos, la moneda y los límites salen del `.env` porque dependen del
+país de la cuenta — 5000 no significa lo mismo en pesos colombianos que en otra
+moneda. Sin importes configurados se enseña solo el campo libre, en vez de
+proponer cifras inventadas.
+
+Conviene fijar `PUBLIC_BASE_URL` con la dirección pública: es a donde Mercado
+Pago devuelve al donante, y detrás del proxy inverso no se puede deducir de la
+petición. Con `https` se activa además el retorno automático.
+
+Para probar sin cobrar de verdad sirve el token de prueba (`TEST-...`) del panel
+de Mercado Pago, que devuelve un enlace de sandbox.
+
 ## Verificar el contenido
 
 `npm run db:verify` comprueba que lo guardado es de verdad la serie que se quiso
@@ -158,9 +200,12 @@ streamflix/
 │  │  ├─ update-posters.js # portadas del catálogo desde AniList/TMDB
 │  │  └─ verify-content.js # verifica que lo guardado sea la serie correcta
 │  ├─ middleware/auth.js   # verificación de JWT
+│  ├─ lib/telegram.js      # avisos al chat que administra el catálogo
 │  └─ routes/
 │     ├─ auth.js           # register / login / me
 │     ├─ series.js         # catálogo, búsqueda, filtro, detalle
+│     ├─ requests.js       # solicitudes de contenido (requiere sesión)
+│     ├─ donations.js      # Checkout Pro de Mercado Pago
 │     └─ watchlist.js      # Mi Lista (requiere sesión)
 └─ public/
    ├─ index.html
@@ -171,7 +216,8 @@ streamflix/
 ## Modelo de datos
 `Users`, `Genres`, `Series`, `SeriesGenres` (N:N), `Seasons`, `Episodes`
 (con `VideoUrl` + marcas `IntroStartSec`/`IntroEndSec`/`OutroStartSec`),
-`Watchlist` (Mi Lista) y `WatchProgress` (seguir viendo).
+`Watchlist` (Mi Lista), `WatchProgress` (seguir viendo) y `ContentRequests`
+(lo que la gente pide que se importe).
 
 ## Proxy de reproducción
 Todo lo que no sea `Provider = 'embed'` se reproduce a través de
