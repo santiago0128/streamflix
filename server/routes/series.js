@@ -153,6 +153,36 @@ function olvidarResolucion(episodeId, audio) {
   resolutionCache.delete(claveResolucion(episodeId, audio));
 }
 
+// Idiomas que ofrece una temporada entera. El selector se dibuja con esto y no
+// con lo que tenga el capítulo suelto: en Bleach el latino llega hasta el 191 y
+// el resto es solo japonés, así que mirando el capítulo el desplegable aparecía
+// y desaparecía a mitad de temporada. Si la temporada no tiene latino por
+// ningún lado, no hay nada que elegir y el selector no se enseña.
+//
+// Se cachea porque son dos consultas con OPENJSON sobre todos los capítulos de
+// la temporada y la respuesta no cambia entre reproducciones.
+const AUDIO_TEMPORADA_TTL_MS = 10 * 60 * 1000;
+const AUDIO_TEMPORADA_CACHE_MAX = 100;
+const audioTemporadaCache = new Map();
+
+function leerAudioTemporada(seasonId) {
+  const hit = audioTemporadaCache.get(seasonId);
+  if (!hit) return null;
+  if (Date.now() > hit.expiraEn) {
+    audioTemporadaCache.delete(seasonId);
+    return null;
+  }
+  return hit.opciones;
+}
+
+function guardarAudioTemporada(seasonId, opciones) {
+  if (audioTemporadaCache.size >= AUDIO_TEMPORADA_CACHE_MAX) {
+    audioTemporadaCache.delete(audioTemporadaCache.keys().next().value);
+  }
+  audioTemporadaCache.set(seasonId, { opciones, expiraEn: Date.now() + AUDIO_TEMPORADA_TTL_MS });
+  return opciones;
+}
+
 // Reescribe el playlist para que todo lo que cuelga de él vuelva por el proxy.
 function rewritePlaylist(body, baseUrl, episodeId, referer) {
   const toProxy = (rawUrl) => {
@@ -637,6 +667,37 @@ function asSnapshotList(snapshotOrList) {
   return snapshotOrList ? [snapshotOrList] : [];
 }
 
+// Catálogos de anime, en orden de preferencia. animejara va primero: es el que
+// trae el latino con la ficha de idiomas por capítulo. henaojara es el mismo
+// grupo con catálogo más viejo, y jkanime cierra como respaldo, que es
+// subtitulado casi entero. Lo que no esté en la lista se prueba al final.
+const CATALOGOS_ANIME = ['animejara', 'henaojara', 'jkanime'];
+
+function prioridadCatalogo(snapshot) {
+  const posicion = CATALOGOS_ANIME.indexOf(String(snapshot?.Origen || '').toLowerCase());
+  return posicion === -1 ? CATALOGOS_ANIME.length : posicion;
+}
+
+/**
+ * Parte la lista de snapshots en bloques por catálogo de origen, respetando el
+ * orden en que los dejó `findEpisodeSnapshot` (que es el de preferencia).
+ *
+ * Sin esto la preferencia entre catálogos se perdía: los candidatos se juntaban
+ * todos y se ordenaban por nombre de servidor, así que el vidhide del catálogo
+ * de respaldo se probaba antes que cualquier opción del preferido. Agrupando,
+ * el segundo catálogo solo entra cuando el primero no ha dado un vídeo válido.
+ */
+function agruparPorOrigen(snapshotOrList) {
+  const grupos = [];
+  for (const snapshot of asSnapshotList(snapshotOrList)) {
+    const origen = String(snapshot?.Origen || '').toLowerCase();
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo && ultimo.origen === origen) ultimo.snapshots.push(snapshot);
+    else grupos.push({ origen, snapshots: [snapshot] });
+  }
+  return grupos.map((grupo) => grupo.snapshots);
+}
+
 function parsePlayerOptions(snapshotOrList) {
   return asSnapshotList(snapshotOrList).flatMap((snapshot) => [
     ...parseJsonArray(snapshot?.PlayerOptionsJson),
@@ -671,6 +732,16 @@ function normalizeAudioCode(value) {
     return 'ja';
   }
 
+  // Las etiquetas no vienen de una lista cerrada: cada catálogo escribe la
+  // suya. animejara pone "JAPONES", que no estaba en ninguna lista y se
+  // quedaba tal cual — el reproductor lo enseñaba como un idioma aparte
+  // llamado "Original", junto al "Japonés" de jkanime, y ninguno de los dos
+  // casaba con el otro.
+  if (raw.includes('japon') || raw.includes('subtitul')) return 'ja';
+  if (raw.includes('latino')) return 'es-la';
+  if (raw.includes('castellano') || raw.includes('españa')) return 'es-es';
+  if (raw.includes('español') || raw.includes('espanol')) return 'es';
+
   return raw;
 }
 
@@ -688,26 +759,57 @@ function audioPreferenceFromReq(req) {
   return normalizeAudioCode(req?.query?.audio);
 }
 
-function collectAudioOptions(snapshot) {
+function audioDeOpcion(option) {
+  return normalizeAudioCode(option?.languageCode || option?.lang || option?.language);
+}
+
+// Orden en que se ofrecen los idiomas, y con ello cuál suena si nadie ha
+// elegido: el latino primero, que es lo que se busca en animejara. El japonés
+// va al final porque es el que siempre está —todo el catálogo de jkanime es
+// subtitulado—, así que ponerlo delante dejaría el latino sin usar nunca.
+const ORDEN_AUDIO = { 'es-la': 0, es: 1, 'es-es': 2, ja: 3 };
+
+function ordenarAudios(codes) {
   const seen = new Set();
-  return [
-    ...parseServerOptions(snapshot).map((option) =>
-      normalizeAudioCode(option?.languageCode || option?.lang || option?.language)
-    ),
-    ...parsePlayerOptions(snapshot).map((option) =>
-      normalizeAudioCode(option?.languageCode || option?.lang || option?.language)
-    )
-  ]
+  return codes
     .filter((code) => {
       if (!code || seen.has(code)) return false;
       seen.add(code);
       return true;
     })
     .map((code) => ({ code, label: labelForAudio(code) }))
-    .sort((a, b) => {
-      const order = { ja: 0, 'es-la': 1, 'es-es': 2, es: 3 };
-      return (order[a.code] ?? 99) - (order[b.code] ?? 99);
-    });
+    .sort((a, b) => (ORDEN_AUDIO[a.code] ?? 99) - (ORDEN_AUDIO[b.code] ?? 99));
+}
+
+function collectAudioOptions(snapshot) {
+  return ordenarAudios([
+    ...parseServerOptions(snapshot).map(audioDeOpcion),
+    ...parsePlayerOptions(snapshot).map(audioDeOpcion)
+  ]);
+}
+
+/**
+ * ¿Todo lo que hay en estos snapshots es de un solo idioma, y es el que se
+ * pide?
+ *
+ * Los snapshots guardan una URL de vídeo ya verificada por fila
+ * (`VideoSrcUrl`, `VerifiedVideoUrl`, `PrimaryVideoUrl`) que no dice de qué
+ * idioma es: es la que el importador comprobó, sin más. Usarla cuando alguien
+ * pide un idioma concreto es lo que hacía que Death Note sonara en japonés con
+ * el latino elegido — la ficha de animejara trae los tres idiomas en la misma
+ * fila y esa URL suelta era la del primero que respondió.
+ *
+ * Solo es seguro usarla cuando la fila entera habla un único idioma y es el
+ * pedido; si no, se resuelve por la opción concreta, que sí lo declara.
+ */
+function hablaSoloEse(snapshotOrList, audio) {
+  if (!audio) return false;
+  const idiomas = new Set(
+    [...parseServerOptions(snapshotOrList), ...parsePlayerOptions(snapshotOrList)]
+      .map(audioDeOpcion)
+      .filter(Boolean)
+  );
+  return idiomas.size === 1 && idiomas.has(audio);
 }
 
 function serverPriority(option) {
@@ -734,36 +836,55 @@ function serverOptionsForAudio(snapshot, preferredAudio = null) {
   return options;
 }
 
+/**
+ * Embeds a probar, en orden. Cada uno viaja con la página del catálogo del que
+ * salió: el Referer no se puede compartir entre catálogos, porque hay CDN que
+ * responden 403 cuando el embed de un sitio llega con el Referer de otro.
+ */
 function collectEmbedCandidates(snapshot, episode, preferredAudio = null) {
-  const urls = [];
+  const candidatos = [];
 
-  for (const option of serverOptionsForAudio(snapshot, preferredAudio)) {
-    urls.push(option?.generatedEmbedUrl);
-  }
+  for (const grupo of agruparPorOrigen(snapshot)) {
+    const conPagina = grupo.find((item) => item?.EpisodePageUrl || item?.SeriesUrl);
+    const pageUrl = conPagina?.EpisodePageUrl || conPagina?.SeriesUrl || null;
+    const urls = [];
 
-  for (const option of parsePlayerOptions(snapshot)) {
-    const language = normalizeAudioCode(option?.languageCode || option?.lang || option?.language);
-    if (preferredAudio && language && language !== preferredAudio) continue;
-    urls.push(option?.embedUrl, option?.url, option?.playerUrl);
-  }
+    for (const option of serverOptionsForAudio(grupo, preferredAudio)) {
+      urls.push(option?.generatedEmbedUrl);
+    }
 
-  if (!preferredAudio) {
-    for (const item of asSnapshotList(snapshot)) {
+    for (const option of parsePlayerOptions(grupo)) {
+      const language = audioDeOpcion(option);
+      // Una opción sin idioma declarado (el reproductor propio de jkanime no lo
+      // trae) solo vale si su catálogo entero habla el idioma que se pide. Antes
+      // colaba: pidiendo latino se acababa reproduciendo el reproductor japonés
+      // de jkanime, que no declara idioma y por eso pasaba el filtro.
+      if (preferredAudio && language !== preferredAudio &&
+          !(language == null && hablaSoloEse(grupo, preferredAudio))) continue;
+      urls.push(option?.embedUrl, option?.url, option?.playerUrl);
+    }
+
+    for (const item of grupo) {
+      if (preferredAudio && !hablaSoloEse([item], preferredAudio)) continue;
       urls.push(
         item?.VideoSrcReferer,
         item?.VerifiedVideoReferer,
         item?.PrimaryVideoUrl
       );
     }
-    urls.push(
-      episode?.VideoUrl
-    );
+
+    for (const url of urls) candidatos.push({ url, pageUrl });
+  }
+
+  if (!preferredAudio) {
+    candidatos.push({ url: episode?.VideoUrl, pageUrl: null });
   }
 
   const seen = new Set();
-  return urls
-    .map((url) => normalizeUrl(url))
-    .filter((url) => {
+  return candidatos
+    .map((candidato) => ({ url: normalizeUrl(candidato.url), pageUrl: candidato.pageUrl }))
+    .filter((candidato) => {
+      const { url } = candidato;
       if (!url || looksLikeDirectVideoUrl(url) || seen.has(url)) return false;
       seen.add(url);
       return /^https?:/i.test(url);
@@ -771,19 +892,27 @@ function collectEmbedCandidates(snapshot, episode, preferredAudio = null) {
 }
 
 function collectDirectVideoCandidates(snapshot, episode, preferredAudio = null) {
-  const candidates = [
-    ...serverOptionsForAudio(snapshot, preferredAudio).map((option) => ({
-      url: option?.decodedRemoteUrl,
-      referer: option?.generatedEmbedUrl
-    }))
-  ];
+  const candidates = [];
 
-  for (const item of asSnapshotList(snapshot)) {
-    candidates.push(
-      { url: item?.VideoSrcUrl, referer: item?.VideoSrcReferer },
-      { url: item?.VerifiedVideoUrl, referer: item?.VerifiedVideoReferer },
-      { url: item?.PrimaryVideoUrl, referer: item?.VerifiedVideoReferer || item?.VideoSrcReferer }
-    );
+  for (const grupo of agruparPorOrigen(snapshot)) {
+    for (const option of serverOptionsForAudio(grupo, preferredAudio)) {
+      candidates.push({
+        url: option?.decodedRemoteUrl,
+        referer: option?.generatedEmbedUrl
+      });
+    }
+
+    for (const item of grupo) {
+      // Misma regla que en los embeds: la URL suelta de la fila no dice de qué
+      // idioma es, así que con un idioma pedido solo se usa si la fila entera
+      // es de ese idioma.
+      if (preferredAudio && !hablaSoloEse([item], preferredAudio)) continue;
+      candidates.push(
+        { url: item?.VideoSrcUrl, referer: item?.VideoSrcReferer },
+        { url: item?.VerifiedVideoUrl, referer: item?.VerifiedVideoReferer },
+        { url: item?.PrimaryVideoUrl, referer: item?.VerifiedVideoReferer || item?.VideoSrcReferer }
+      );
+    }
   }
 
   if (!preferredAudio) {
@@ -829,12 +958,9 @@ async function resolveDirectVideoCandidate(snapshot, episode, preferredAudio = n
 async function refreshVideoSourceFromSnapshot(snapshot, preferredAudio = null) {
   const embedCandidates = collectEmbedCandidates(snapshot, null, preferredAudio);
 
-  for (const embedUrl of embedCandidates) {
+  for (const candidato of embedCandidates) {
     try {
-      const referer = asSnapshotList(snapshot).find((item) =>
-        item?.EpisodePageUrl || item?.SeriesUrl
-      );
-      const resolved = await resolvePlayableUrl(embedUrl, referer?.EpisodePageUrl || referer?.SeriesUrl || embedUrl);
+      const resolved = await resolvePlayableUrl(candidato.url, candidato.pageUrl || candidato.url);
       if (resolved) return resolved;
     } catch {
       continue;
@@ -876,16 +1002,43 @@ async function resolvePlayableUrl(candidateUrl, referer, seen = new Set(), depth
 }
 
 function fallbackEmbedUrl(snapshot, episode, preferredAudio = null) {
-  return collectEmbedCandidates(snapshot, episode, preferredAudio)[0] || null;
+  return collectEmbedCandidates(snapshot, episode, preferredAudio)[0]?.url || null;
+}
+
+/**
+ * Idioma que se va a reproducir de verdad: el pedido si este capítulo lo tiene
+ * y, si no, el mejor que tenga.
+ *
+ * Es lo que hace que el siguiente capítulo suene aunque solo esté en japonés:
+ * la preferencia sigue siendo la del usuario —eso lo guarda el navegador—, pero
+ * un capítulo que no la tiene no se queda mudo.
+ */
+function audioSeleccionado(audioEpisodio, requestedAudio) {
+  if (requestedAudio && audioEpisodio.some((option) => option.code === requestedAudio)) {
+    return requestedAudio;
+  }
+  return audioEpisodio[0]?.code || null;
 }
 
 async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = undefined) {
   const snapshot = providedSnapshot === undefined ? await findEpisodeSnapshot(pool, episode) : providedSnapshot;
-  const audioOptions = collectAudioOptions(snapshot);
+  const audioEpisodio = collectAudioOptions(snapshot);
   const requestedAudio = audioPreferenceFromReq(req);
-  const selectedAudio = audioOptions.find((option) => option.code === requestedAudio)?.code
-    || (audioOptions[0] && audioOptions[0].code)
-    || null;
+  const selectedAudio = audioSeleccionado(audioEpisodio, requestedAudio);
+
+  // El selector se dibuja con los idiomas de la temporada, no con los de este
+  // capítulo: si no, aparece y desaparece al pasar de capítulo. Cuando no se
+  // pueden averiguar, se usan los del capítulo, que es lo que había antes.
+  //
+  // Se suman los del capítulo en vez de sustituirlos: la consulta de temporada
+  // empareja los snapshots por su cuenta y podría dejarse alguno, y un idioma
+  // que suena pero no está en la lista es un desplegable que no puede marcar lo
+  // que se está oyendo.
+  const audioTemporada = await audioOptionsDeTemporada(pool, episode);
+  const audioOptions = audioTemporada?.length
+    ? ordenarAudios([...audioTemporada, ...audioEpisodio].map((option) => option.code))
+    : audioEpisodio;
+  const audioDisponible = audioEpisodio.map((option) => option.code);
   const comoRespuesta = (fuente, refreshed) => ({
     provider: fuente.provider || 'file',
     url: buildPlaybackUrl(req, episode.Id, { audio: selectedAudio }),
@@ -896,7 +1049,11 @@ async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = und
     refreshed,
     canTrackProgress: true,
     audio: selectedAudio,
-    audioOptions
+    audioOptions,
+    audioDisponible,
+    // Avisa de que suena otro idioma del pedido, para que el reproductor lo
+    // enseñe sin dar por perdida la preferencia del usuario.
+    audioFallback: Boolean(requestedAudio && selectedAudio !== requestedAudio)
   });
 
   // Abrir la ficha de un anime ya resuelve la reproducción para saber qué
@@ -938,7 +1095,9 @@ async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = und
       refreshed: false,
       canTrackProgress: false,
       audio: selectedAudio,
-      audioOptions
+      audioOptions,
+      audioDisponible,
+      audioFallback: Boolean(requestedAudio && selectedAudio !== requestedAudio)
     };
   }
 
@@ -962,7 +1121,9 @@ async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = und
       refreshed: false,
       canTrackProgress: true,
       audio: selectedAudio,
-      audioOptions
+      audioOptions,
+      audioDisponible,
+      audioFallback: Boolean(requestedAudio && selectedAudio !== requestedAudio)
     };
   }
 
@@ -976,7 +1137,9 @@ async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = und
     refreshed: false,
     canTrackProgress: fallbackProvider !== 'embed',
     audio: selectedAudio,
-    audioOptions
+    audioOptions,
+    audioDisponible,
+    audioFallback: Boolean(requestedAudio && selectedAudio !== requestedAudio)
   };
 }
 
@@ -1152,6 +1315,40 @@ async function findEpisodeSnapshot(pool, episode) {
 
   try {
     if (sourceRef.toLowerCase().startsWith('jkanime:')) {
+      // El anime vive en varios catálogos y el orden de esta lista es el orden
+      // en que se prueban, según CATALOGOS_ANIME: animejara primero y jkanime
+      // el último. Los candidatos de un catálogo solo se tocan cuando ninguno
+      // de los anteriores da un vídeo que responda, así que el respaldo sigue
+      // entero — lo importado desde jkanime se reproduce igual que antes
+      // cuando los demás no tienen ese capítulo.
+      const animeExterno = await pool.request()
+        .input('slug', sql.NVarChar(255), normalizedSlug)
+        .input('episodeNumber', sql.Int, episode.EpisodeNumber)
+        .input('seasonNumber', sql.Int, episode.SeasonNumber)
+        .query(`
+          SELECT
+            LOWER(SourceSite) AS Origen,
+            EpisodePageUrl,
+            VideoSrcUrl,
+            VideoSrcReferer,
+            VerifiedVideoUrl,
+            VerifiedVideoReferer,
+            PrimaryVideoUrl,
+            PrimaryVideoSource,
+            NULL AS LocalPlayerOptionsJson,
+            NULL AS ServerOptionsJson,
+            NULL AS DownloadOptionsJson,
+            NULL AS PlayerEmbedsJson,
+            PlayerOptionsJson
+          FROM dbo.PelisPlusSnapshots
+          WHERE ContentType = 'anime'
+            AND SeriesSlug = @slug
+            AND EpisodeNumber = @episodeNumber
+            AND SeasonNumber = @seasonNumber
+          ORDER BY UpdatedAt DESC, Id DESC
+        `);
+      snapshots.push(...animeExterno.recordset);
+
       // En una franquicia de anime cada temporada es una ficha distinta del
       // sitio de origen, con su propio slug y su numeración empezando otra vez
       // en 1. El slug de la serie no basta para saber de dónde salió un
@@ -1173,6 +1370,7 @@ async function findEpisodeSnapshot(pool, episode) {
         .input('episodeTitle', sql.NVarChar(500), episode.Title || null)
         .query(`
           SELECT TOP 1
+            LOWER(SourceSite) AS Origen,
             EpisodePageUrl,
             VideoSrcUrl,
             VideoSrcReferer,
@@ -1199,32 +1397,11 @@ async function findEpisodeSnapshot(pool, episode) {
         `);
       snapshots.push(...jkResult.recordset);
 
-      const extraAnime = await pool.request()
-        .input('slug', sql.NVarChar(255), normalizedSlug)
-        .input('episodeNumber', sql.Int, episode.EpisodeNumber)
-        .input('seasonNumber', sql.Int, episode.SeasonNumber)
-        .query(`
-          SELECT
-            EpisodePageUrl,
-            VideoSrcUrl,
-            VideoSrcReferer,
-            VerifiedVideoUrl,
-            VerifiedVideoReferer,
-            PrimaryVideoUrl,
-            PrimaryVideoSource,
-            NULL AS LocalPlayerOptionsJson,
-            NULL AS ServerOptionsJson,
-            NULL AS DownloadOptionsJson,
-            NULL AS PlayerEmbedsJson,
-            PlayerOptionsJson
-          FROM dbo.PelisPlusSnapshots
-          WHERE ContentType = 'anime'
-            AND SeriesSlug = @slug
-            AND EpisodeNumber = @episodeNumber
-            AND SeasonNumber = @seasonNumber
-          ORDER BY UpdatedAt DESC, Id DESC
-        `);
-      snapshots.push(...extraAnime.recordset);
+      // El orden lo manda CATALOGOS_ANIME, no el orden de las consultas: si el
+      // importador añade un sitio nuevo, entra por su nombre y no por dónde se
+      // consultó. `sort` es estable, así que dentro de cada catálogo se
+      // conserva la preferencia que trae su propia consulta.
+      snapshots.sort((a, b) => prioridadCatalogo(a) - prioridadCatalogo(b));
       return snapshots;
     }
 
@@ -1238,6 +1415,7 @@ async function findEpisodeSnapshot(pool, episode) {
       .input('seasonNumber', sql.Int, episode.SeasonNumber)
       .query(`
         SELECT
+          LOWER(SourceSite) AS Origen,
           EpisodePageUrl,
           VideoSrcUrl,
           VideoSrcReferer,
@@ -1263,6 +1441,77 @@ async function findEpisodeSnapshot(pool, episode) {
   }
 }
 
+/**
+ * Idiomas que ofrece la temporada del episodio, mirando los dos catálogos de
+ * anime. Devuelve null cuando no se puede saber (no es anime, falta la tabla o
+ * la consulta falla), y entonces quien llama se queda con los del capítulo.
+ *
+ * El idioma se saca en SQL con OPENJSON en vez de traerse los JSON enteros:
+ * una temporada de Bleach son 366 capítulos con una decena de servidores cada
+ * uno, y aquí solo hace falta la lista de idiomas distintos.
+ */
+async function audioOptionsDeTemporada(pool, episode) {
+  const seasonId = Number(episode?.SeasonId);
+  const sourceRef = String(episode?.SourceRef || '');
+  if (!Number.isInteger(seasonId) || !sourceRef.toLowerCase().startsWith('jkanime:')) return null;
+
+  const enCache = leerAudioTemporada(seasonId);
+  if (enCache) return enCache;
+
+  const slug = normalizeSourceRef(sourceRef);
+  const seasonRef = String(episode?.SeasonSourceRef || '');
+  const seasonSlug = seasonRef.toLowerCase().startsWith('jkanime:')
+    ? normalizeSourceRef(seasonRef)
+    : null;
+
+  // El idioma puede venir en tres nombres distintos según el catálogo:
+  // languageCode en jkanime (1 = japonés, 3 = latino), language en animejara y
+  // henaojara ("LATINO"), y lang en alguna ficha vieja.
+  const IDIOMA = `COALESCE(
+    JSON_VALUE(o.value, '$.languageCode'),
+    JSON_VALUE(o.value, '$.lang'),
+    JSON_VALUE(o.value, '$.language'))`;
+
+  try {
+    const externos = await pool.request()
+      .input('slug', sql.NVarChar(255), slug)
+      .input('seasonNumber', sql.Int, episode.SeasonNumber)
+      .query(`
+        SELECT DISTINCT ${IDIOMA} AS Idioma
+          FROM dbo.PelisPlusSnapshots s
+         CROSS APPLY OPENJSON(ISNULL(s.PlayerOptionsJson, '[]')) o
+         WHERE s.ContentType = 'anime'
+           AND s.SeriesSlug = @slug
+           AND s.SeasonNumber = @seasonNumber
+      `);
+
+    // Se emparejan los capítulos de la temporada con sus snapshots por las
+    // mismas tres vías que findEpisodeSnapshot, para que el selector no
+    // prometa un idioma que luego la reproducción no encuentra.
+    const jk = await pool.request()
+      .input('seasonId', sql.Int, seasonId)
+      .input('slug', sql.NVarChar(255), slug)
+      .input('seasonSlug', sql.NVarChar(255), seasonSlug)
+      .query(`
+        SELECT DISTINCT ${IDIOMA} AS Idioma
+          FROM dbo.Episodes e
+          JOIN dbo.JkAnimeEpisodeSnapshots s
+            ON s.EpisodeNumber = e.EpisodeNumber
+           AND (s.SeriesSlug = @seasonSlug OR s.EpisodeTitle = e.Title OR s.SeriesSlug = @slug)
+         CROSS APPLY OPENJSON(ISNULL(s.ServerOptionsJson, '[]')) o
+         WHERE e.SeasonId = @seasonId
+      `);
+
+    const opciones = ordenarAudios(
+      [...externos.recordset, ...jk.recordset].map((fila) => normalizeAudioCode(fila.Idioma))
+    );
+    return guardarAudioTemporada(seasonId, opciones);
+  } catch (err) {
+    console.error('No pude leer los idiomas de la temporada:', err.message);
+    return null;
+  }
+}
+
 router.get('/episodes/:id/playback', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'Id inválido' });
@@ -1278,6 +1527,7 @@ router.get('/episodes/:id/playback', async (req, res) => {
           e.Provider,
           e.EpisodeNumber,
           e.Title,
+          se.Id AS SeasonId,
           se.SeasonNumber,
           se.SourceRef AS SeasonSourceRef,
           sr.SourceRef
@@ -1502,6 +1752,7 @@ router.get('/episodes/:id/stream', async (req, res) => {
           e.Provider,
           e.EpisodeNumber,
           e.Title,
+          se.Id AS SeasonId,
           se.SeasonNumber,
           se.SourceRef AS SeasonSourceRef,
           sr.SourceRef
@@ -1516,7 +1767,12 @@ router.get('/episodes/:id/stream', async (req, res) => {
       return res.status(404).json({ error: 'Episodio no encontrado' });
     }
 
-    const preferredAudio = audioPreferenceFromReq(req);
+    const requestedAudio = audioPreferenceFromReq(req);
+    // /playback ya manda el idioma que suena de verdad, así que casi siempre
+    // coinciden. Se ajusta igualmente por si esta URL se pide con uno que el
+    // capítulo no tiene: ahora los candidatos se filtran por idioma de verdad,
+    // y sin ajustar se quedaría sin ninguno en vez de sonar en el que haya.
+    let preferredAudio = requestedAudio;
     let snapshot = null;
     const cargarSnapshot = async () => {
       if (snapshot === null) snapshot = await findEpisodeSnapshot(pool, episode);
@@ -1532,6 +1788,14 @@ router.get('/episodes/:id/stream', async (req, res) => {
     };
 
     let fuente = leerResolucion(id, preferredAudio);
+    if (!fuente) {
+      const ajustado = audioSeleccionado(collectAudioOptions(await cargarSnapshot()), requestedAudio);
+      if (ajustado !== preferredAudio) {
+        preferredAudio = ajustado;
+        fuente = leerResolucion(id, preferredAudio);
+      }
+    }
+
     if (!fuente) {
       const snap = await cargarSnapshot();
       const direct = await resolveDirectVideoCandidate(snap, episode, preferredAudio);

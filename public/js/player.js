@@ -376,6 +376,10 @@ const Player = (() => {
   }
 
   function syncAudioSelect(playback) {
+    // Los idiomas que llegan son los de la temporada entera, no los del
+    // capítulo: así el selector no aparece y desaparece a mitad de serie. Con
+    // uno solo no hay nada que elegir — una temporada sin latino no enseña el
+    // desplegable.
     const options = Array.isArray(playback?.audioOptions) ? playback.audioOptions : [];
     audioTrackSelect.innerHTML = '';
 
@@ -384,20 +388,31 @@ const Player = (() => {
       return;
     }
 
-    const selected =
-      playback?.audio ||
-      options.find((option) => option.code === preferredAudio)?.code ||
-      options[0].code;
+    const disponibles = Array.isArray(playback?.audioDisponible) ? playback.audioDisponible : [];
+    const etiqueta = (code) => options.find((option) => option.code === code)?.label || code;
+    // Se marca el que está sonando, que no siempre es el preferido: un capítulo
+    // que solo está en japonés suena en japonés aunque la serie esté puesta en
+    // latino.
+    const sonando = playback?.audio || preferredAudio || options[0].code;
+
     for (const option of options) {
       const el = document.createElement('option');
       el.value = option.code;
-      el.textContent = option.label;
-      el.selected = option.code === selected;
+      el.textContent = disponibles.length && !disponibles.includes(option.code)
+        ? `${option.label} · no en este capítulo`
+        : option.label;
+      el.selected = option.code === sonando;
       audioTrackSelect.appendChild(el);
     }
 
-    preferredAudio = selected;
-    localStorage.setItem(audioPrefKey(), preferredAudio);
+    // Aquí no se guarda nada a propósito. Guardar lo que devolvía el servidor
+    // pisaba la preferencia del usuario en cuanto un capítulo no tenía su
+    // idioma —el 192 de Bleach, sin latino— y a partir de ahí la serie entera
+    // se quedaba en el otro idioma. La preferencia solo la cambia el usuario,
+    // en el `change` de abajo.
+    audioTrackSelect.title = playback?.audioFallback
+      ? `Este capítulo no está en ${etiqueta(preferredAudio)}: suena en ${etiqueta(sonando)}`
+      : 'Idioma de audio';
     audioTrackSelect.hidden = false;
   }
 

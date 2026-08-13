@@ -121,7 +121,10 @@
         select.appendChild(el);
       });
 
-      setSeriesAudioPref(detail.Id, selected);
+      // Sin guardar: el idioma que resolvió el servidor para el primer capítulo
+      // no es una elección del usuario. Escribirlo aquí fijaba la serie en
+      // japonés solo por abrir la ficha de una temporada cuyo primer capítulo
+      // no tiene latino.
       group.hidden = false;
     } catch {
       if (state.detail?.Id === detail.Id) {

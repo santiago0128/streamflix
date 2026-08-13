@@ -275,6 +275,56 @@ El proxy hace tres cosas además de reenviar el stream:
 - Destapa los segmentos que algunos CDN disfrazan de imagen (cabecera PNG con el
   MPEG-TS detrás).
 
+### Orden de las fuentes en el anime
+
+Un capítulo de anime puede estar en varios catálogos. El orden lo fija
+`CATALOGOS_ANIME` en [series.js](server/routes/series.js), no el orden de las
+consultas:
+
+1. **animejara** — el que trae el latino, con los idiomas declarados por capítulo.
+2. **henaojara** — mismo grupo, catálogo más viejo. Ambos viven en `PelisPlusSnapshots`
+   con `ContentType = 'anime'`; se distinguen por `SourceSite`.
+3. **jkanime** (`JkAnimeEpisodeSnapshots`) — respaldo, subtitulado casi entero.
+
+Los candidatos se agrupan por catálogo antes de ordenarlos por servidor, para que
+la preferencia entre sitios mande sobre la preferencia entre servidores: sin eso,
+un `vidhide` de jkanime se probaba antes que cualquier opción de animejara, porque
+la lista de servidores se ordenaba junta y ese es el servidor mejor valorado.
+
+El respaldo sigue entero: si un catálogo no tiene el capítulo, o ninguno de sus
+candidatos devuelve un video que responda, se resuelve contra el siguiente. Cada
+embed viaja con el `Referer` de la página de **su** catálogo, no con el del
+primero de la lista.
+
+### Idiomas
+
+El idioma pedido se respeta o no se reproduce: **nunca se sirve otro idioma bajo
+la etiqueta del elegido**. Eso obliga a descartar dos clases de fuente cuando hay
+un idioma concreto en juego:
+
+- Las opciones que no declaran idioma (el reproductor propio de jkanime), salvo
+  que todo su catálogo hable ese mismo idioma.
+- La URL ya verificada que cada snapshot guarda suelta (`VideoSrcUrl`,
+  `VerifiedVideoUrl`, `PrimaryVideoUrl`), salvo que la fila entera sea de ese
+  idioma. En animejara los tres idiomas van en la misma fila, así que esa URL no
+  dice de cuál es: era lo que hacía sonar Death Note en japonés con el latino
+  puesto.
+
+El desplegable se dibuja con los idiomas de la **temporada** (`audioOptions`), no
+con los del capítulo: si la temporada no tiene latino no hay nada que elegir y no
+aparece. La respuesta de `/playback` trae además `audioDisponible` (lo que tiene
+ese capítulo) y `audioFallback`, para poder marcar «no en este capítulo» sin
+mentir sobre lo que suena.
+
+Cuando el capítulo no tiene el idioma preferido —el 192 de Bleach en adelante no
+tiene latino— suena el que haya y **la preferencia no se toca**: solo la cambia el
+usuario desde el selector. Antes se guardaba el idioma que resolvía el servidor, y
+un capítulo sin latino dejaba la serie entera en japonés para siempre.
+
+Sin preferencia guardada manda `ORDEN_AUDIO`: latino primero y japonés al final,
+porque el japonés está en todo el catálogo de jkanime y ponerlo delante dejaría el
+latino sin usar nunca.
+
 ## Reproductor — atajos de teclado
 | Tecla | Acción |
 |-------|--------|
