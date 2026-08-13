@@ -1,7 +1,16 @@
 name: Actualizar portadas del catálogo
 
-# A mano y solo a mano: esto escribe en la base de producción, así que no puede
-# colgar de un push. Por defecto simula y no toca nada.
+# A mano cuando haga falta, y una vez al día por su cuenta.
+#
+# Lo diario nació de que una portada rota no avisa: nadie mira el catálogo
+# entero, y el aviso llega cuando alguien abre una ficha y se encuentra el hueco.
+# La pasada diaria usa --revisar, que pide cada imagen y rehace solo las que no
+# responden, así que en un día normal no cambia nada y apenas cuesta.
+#
+# Escribe en la base de producción, pero lo hace con red: no toca lo que ya
+# funciona, comprueba la imagen nueva antes de guardarla, salta las fichas cuyo
+# año no cuadra —que casi siempre son otra cosa con el mismo nombre— y deja el
+# respaldo para deshacerlo.
 on:
   workflow_dispatch:
     inputs:
@@ -9,6 +18,10 @@ on:
         description: 'Escribir en la base. Sin marcar solo simula.'
         type: boolean
         default: false
+      revisar:
+        description: 'Comprobar también las portadas que ya parecían buenas'
+        type: boolean
+        default: true
       tipos:
         description: 'Tipos de contenido (movie, series, anime)'
         type: string
@@ -17,6 +30,8 @@ on:
         description: 'Incluir las fichas cuyo año no cuadra (revisa antes la simulación)'
         type: boolean
         default: false
+  schedule:
+    - cron: '40 5 * * *'
 
 # Dos ejecuciones a la vez sobre la misma base no acaban bien.
 concurrency:
@@ -36,19 +51,34 @@ jobs:
 
       - name: Ejecutar el script en el servidor
         env:
+          EVENTO: ${{ github.event_name }}
           APLICAR: ${{ inputs.aplicar }}
+          REVISAR: ${{ inputs.revisar }}
           TIPOS: ${{ inputs.tipos }}
           CON_DESFASE: ${{ inputs.con_desfase_de_anio }}
         run: |
           set -euo pipefail
 
+          # En la pasada diaria no hay nadie leyendo un informe, así que simular
+          # no serviría de nada: repara y revisa siempre. A mano manda lo que se
+          # haya marcado, y por defecto solo simula.
+          if [ "$EVENTO" = "schedule" ]; then
+            APLICAR=true
+            REVISAR=true
+            TIPOS="movie,series,anime"
+            CON_DESFASE=false
+          fi
+
           # --respaldo solo tiene sentido escribiendo; en simulación no hay nada
           # que revertir. El fichero se deja fechado en el servidor.
-          OPCIONES="--type=$TIPOS"
-          if [ "$APLICAR" = "true" ]; then
+          OPCIONES="--type=${TIPOS:-movie,series,anime}"
+          if [ "${REVISAR:-true}" = "true" ]; then
+            OPCIONES="$OPCIONES --revisar"
+          fi
+          if [ "${APLICAR:-false}" = "true" ]; then
             OPCIONES="$OPCIONES --apply --respaldo=/tmp/portadas-respaldo.sql"
           fi
-          if [ "$CON_DESFASE" = "true" ]; then
+          if [ "${CON_DESFASE:-false}" = "true" ]; then
             OPCIONES="$OPCIONES --con-desfase-de-ano"
           fi
 
@@ -64,7 +94,7 @@ jobs:
       - name: Recoger el respaldo
         # Aunque el paso anterior falle: si se cortó a mitad, el respaldo es
         # justamente lo que hace falta para deshacer lo que sí llegó a escribirse.
-        if: ${{ always() && inputs.aplicar }}
+        if: ${{ always() && (inputs.aplicar || github.event_name == 'schedule') }}
         run: |
           ssh -i ~/.ssh/id_deploy -o BatchMode=yes \
             ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
@@ -74,7 +104,7 @@ jobs:
           echo "Líneas de vuelta atrás: $(grep -c '^UPDATE' respaldo-portadas.sql || echo 0)"
 
       - name: Guardar el respaldo como artefacto
-        if: ${{ always() && inputs.aplicar }}
+        if: ${{ always() && (inputs.aplicar || github.event_name == 'schedule') }}
         uses: actions/upload-artifact@v4
         with:
           name: respaldo-portadas

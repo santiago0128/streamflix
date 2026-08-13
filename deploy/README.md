@@ -70,10 +70,16 @@ Las portadas que trae el importador son las de la página de origen: miniaturas
 pequeñas y en dominios que rotan. `update-posters.js` las cambia por las de
 AniList (anime) y TMDB (cine y series). Ver el README principal para el detalle.
 
-Lo cómodo es la acción **«Actualizar portadas del catálogo»** en la pestaña
-Actions del repositorio: usa los mismos secretos que el despliegue, así que no
-hace falta entrar al servidor. Por defecto **simula y no escribe nada** — hay que
-marcar `aplicar` a propósito.
+La acción **«Actualizar portadas del catálogo»** (pestaña Actions) usa los mismos
+secretos que el despliegue, así que no hace falta entrar al servidor. Lanzada a
+mano **simula y no escribe nada** — hay que marcar `aplicar` a propósito.
+
+Además corre **sola una vez al día**, y esa pasada sí repara. Una portada rota no
+avisa: nadie mira el catálogo entero, y uno se entera cuando alguien abre una
+ficha y encuentra el hueco. La pasada diaria usa `--revisar`, que pide cada
+imagen y rehace solo las que no responden, así que en un día normal no cambia
+nada. El respaldo de esa ejecución queda como artefacto igual que el de las
+manuales.
 
 Conviene lanzarla dos veces: la primera sin `aplicar`, para leer el informe, y la
 segunda marcándolo. En el informe importa la lista final: son las fichas cuyo año
