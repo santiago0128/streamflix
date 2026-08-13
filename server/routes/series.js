@@ -555,6 +555,75 @@ function extractPlayerMediaUrls(html, pageUrl) {
     });
 }
 
+/**
+ * URL directa de un embed de streamtape.
+ *
+ * La página no trae el enlace en ningún sitio: lo arma en JavaScript troceando
+ * una cadena que lleva basura delante —`('xcdpe.com/get_video?…').substring(2)
+ * .substring(1)`— y además hay varias líneas señuelo con troceos distintos que
+ * dan dominios que no existen. La buena es la del elemento `robotlink`, que es
+ * la que lee su propio reproductor.
+ *
+ * Se resuelve leyendo la expresión, no ejecutándola: los literales de delante
+ * son el prefijo, el último es la cadena con basura, y los `substring` se
+ * aplican en orden. Nada de esto entra en un `eval`, que es exactamente lo que
+ * no se le hace al JavaScript de una página ajena.
+ */
+function extractStreamtapeUrl(html, pageUrl) {
+  const linea = String(html || '').match(
+    /document\.getElementById\(\s*['"]robotlink['"]\s*\)\.innerHTML\s*=\s*([^;]+);/i
+  );
+  if (!linea) return null;
+
+  const expresion = linea[1];
+  const literales = [...expresion.matchAll(/'([^']*)'|"([^"]*)"/g)].map((m) => m[1] ?? m[2]);
+  if (literales.length < 2) return null;
+
+  const cola = literales[literales.length - 1];
+  const prefijo = literales.slice(0, -1).join('');
+  const recortada = [...expresion.matchAll(/\.substring\(\s*(\d+)\s*\)/g)]
+    .reduce((texto, corte) => texto.substring(Number(corte[1])), cola);
+
+  if (!recortada) return null;
+  return normalizeUrl(`${prefijo}${recortada}`, pageUrl);
+}
+
+/**
+ * Enlaces a otros reproductores dentro de una página que no trae vídeo.
+ *
+ * `extractPlayerMediaUrls` solo devuelve lo que ya parece un vídeo, así que una
+ * página intermedia cortaba la cadena en seco. El multiplayer de
+ * HenaoJara/AnimeJara es exactamente eso: no tiene vídeo, tiene un botón por
+ * servidor y cada uno es un `playVideo("…")`. Sin seguirlos, la reproducción
+ * caía al último recurso —enseñar ese mismo embed dentro del iframe— y quien
+ * abría el capítulo se encontraba la lista de servidores del proveedor, con su
+ * botón de descarga, en vez del episodio.
+ */
+function extractNestedPlayerUrls(html, pageUrl) {
+  const texto = String(html || '');
+  const urls = [];
+
+  // El onclick llega con las comillas escapadas (&quot;), y dentro puede haber
+  // otra URL con su propia query: se corta en el delimitador de cierre, no en
+  // el primer & que aparezca.
+  for (const match of texto.matchAll(/playVideo\(\s*(?:&quot;|&#0?34;|["'])(.*?)(?:&quot;|&#0?34;|["'])\s*\)/gi)) {
+    urls.push(match[1]);
+  }
+
+  for (const match of texto.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)) {
+    urls.push(match[1]);
+  }
+
+  const seen = new Set();
+  return urls
+    .map((url) => normalizeUrl(String(url).replace(/&amp;/gi, '&').trim(), pageUrl))
+    .filter((url) => {
+      if (!url || seen.has(url) || url === pageUrl) return false;
+      seen.add(url);
+      return /^https?:/i.test(url);
+    });
+}
+
 const POW_MAX_NONCE = 2_000_000;
 // Ceder el turno cada pocos miles de intentos cuesta un ~1 % del tiempo total
 // del bucle y a cambio deja el servidor respondiendo mientras tanto.
@@ -638,16 +707,39 @@ async function extractEmbed69Links(html, pageUrl) {
 
 async function fetchPlayerMediaUrls(embedUrl, pageUrl) {
   const attempts = [{ Accept: 'text/html,application/xhtml+xml', Referer: pageUrl }, { Accept: 'text/html,application/xhtml+xml' }];
+  const media = [];
+  const anidados = [];
 
   for (const headers of attempts) {
     const response = await requestText(embedUrl, headers);
     const embed69Links = await extractEmbed69Links(response.body, embedUrl);
     if (embed69Links.length) return embed69Links;
-    const urls = extractPlayerMediaUrls(response.body, embedUrl);
-    if (urls.length) return urls;
+
+    media.push(...extractPlayerMediaUrls(response.body, embedUrl));
+
+    // Streamtape no publica el fichero con extensión, así que no lo pilla el
+    // extractor de arriba: se saca aparte y el sondeo lo valida por
+    // content-type.
+    const streamtape = extractStreamtapeUrl(response.body, embedUrl);
+    if (streamtape) media.push(streamtape);
+
+    anidados.push(...extractNestedPlayerUrls(response.body, embedUrl));
+
+    // El segundo intento, sin Referer, solo si el primero no dio nada.
+    if (media.length || anidados.length) break;
   }
 
-  return [];
+  // Primero lo que parece vídeo y después los otros reproductores, en vez de
+  // devolver solo lo primero que aparezca. Parecer vídeo no es serlo: el enlace
+  // de streamtape del multiplayer acaba en «.mp4» y es una página HTML, así que
+  // devolviéndolo solo a él se daba por agotada la búsqueda y no se llegaba a
+  // probar los demás servidores —que era donde estaba el latino de Death Note.
+  const vistos = new Set();
+  return [...media, ...anidados].filter((url) => {
+    if (!url || vistos.has(url)) return false;
+    vistos.add(url);
+    return true;
+  });
 }
 
 function parseJsonArray(raw) {
