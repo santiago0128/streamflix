@@ -13,6 +13,14 @@ COPY server ./server
 COPY public ./public
 COPY media ./media
 
+# El contenedor corre como `node`, no como root, así que todo lo copiado tiene
+# que ser legible por cualquiera. Los modos vienen del servidor de despliegue y
+# ahí basta con que una carpeta llegue sin permiso de entrada (drwxr--r--) para
+# que Express conteste 500 a cada fichero de dentro: sirve el HTML, pero las
+# imágenes que enlaza dan error y no hay nada en el HTML que lo delate.
+# `a+rX` añade lectura a todo y ejecución solo a los directorios.
+RUN chmod -R a+rX /app/server /app/public /app/media
+
 ENV NODE_ENV=production
 EXPOSE 3000
 

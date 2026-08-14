@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Noxis">
+  <!-- La N del logo (NOXIS), dibujada como trazado y no como texto: un favicon
+       no puede depender de que la fuente exista en el sistema que lo pinta.
+       Los brazos van gruesos a propósito — a 16 px, que es el tamaño real en
+       una pestaña, un trazo fino se convierte en una mancha gris. -->
+  <defs>
+    <linearGradient id="morado" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a86bff"/>
+      <stop offset="1" stop-color="#7a2bff"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#morado)"
+        d="M8 56V8h14l20 30V8h14v48H42L22 26v30z"/>
+</svg>
