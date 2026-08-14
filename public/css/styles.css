@@ -909,6 +909,14 @@ body { max-width: 100%; }
 }
 .request-drop:hover { color: #ff6b6b; background: rgba(255, 107, 107, .1); }
 .request-empty { color: var(--muted); font-size: 13px; }
+/* Va centrado y sin caja para que se lea como el pie de la lista y no compita
+   con «Enviar solicitud», que es el botón que importa en este modal. */
+.request-more {
+  display: block; width: 100%; margin-top: 10px; padding: 8px;
+  background: transparent; border: none; border-radius: 8px;
+  color: var(--accent-soft); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.request-more:hover { background: rgba(139, 61, 255, .12); }
 
 /* Importes sugeridos */
 .donate-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }

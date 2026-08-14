@@ -1101,6 +1101,13 @@
     el.hidden = !msg;
   }
 
+  // Cuántas solicitudes se enseñan de entrada. La lista va dentro del modal,
+  // debajo del formulario: con el historial entero, pedir algo obligaba a
+  // desplazarse un buen rato para llegar al botón, y lo que se mira de verdad
+  // son las últimas.
+  const SOLICITUDES_VISIBLES = 5;
+  let solicitudesExpandidas = false;
+
   function renderMyRequests(solicitudes) {
     const caja = $('requestMine');
     const lista = $('requestList');
@@ -1112,7 +1119,10 @@
       return;
     }
 
-    for (const s of solicitudes) {
+    const hayDeMas = solicitudes.length > SOLICITUDES_VISIBLES;
+    const mostradas = solicitudesExpandidas ? solicitudes : solicitudes.slice(0, SOLICITUDES_VISIBLES);
+
+    for (const s of mostradas) {
       const fila = document.createElement('div');
       fila.className = 'request-row';
 
@@ -1166,6 +1176,22 @@
 
       lista.appendChild(fila);
     }
+
+    if (!hayDeMas) return;
+
+    // Se repinta con lo que ya está en memoria: desplegar el historial no es
+    // motivo para volver a pedirlo al servidor.
+    const verMas = document.createElement('button');
+    verMas.type = 'button';
+    verMas.className = 'request-more';
+    verMas.textContent = solicitudesExpandidas
+      ? 'Ver solo las últimas 5'
+      : `Ver todas (${solicitudes.length})`;
+    verMas.addEventListener('click', () => {
+      solicitudesExpandidas = !solicitudesExpandidas;
+      renderMyRequests(solicitudes);
+    });
+    lista.appendChild(verMas);
   }
 
   async function loadMyRequests() {
@@ -1186,6 +1212,9 @@
     }
     requestError('');
     $('requestForm').reset();
+    // Cada vez que se abre el modal se vuelve a la vista corta: si no, quien
+    // desplegó el historial una vez se lo encuentra desplegado para siempre.
+    solicitudesExpandidas = false;
     openModal(requestModal);
     loadMyRequests();
   }
