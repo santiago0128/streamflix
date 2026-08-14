@@ -202,6 +202,56 @@ a mano. Para forzar un parecido concreto se importa a mano con `--accept-similar
 hay tope ni aprobación. Si algún día molesta, el freno más simple es bajar el
 límite de pendientes por usuario en [server/routes/requests.js](../server/routes/requests.js).
 
+## 3.2 Capítulos nuevos de lo que está en emisión
+
+Dos vigilantes, uno por tipo de contenido, ambos por cron y ambos dentro de la
+imagen del bot:
+
+```cron
+ 5 * * * *  /opt/streamflix/vigilar_series.sh    >> /var/log/streamflix-series.log 2>&1
+20 * * * *  /opt/streamflix/vigilar_emision.sh   >> /var/log/streamflix-emision.log 2>&1
+50 * * * *  /opt/streamflix/auto_fix_streamflix_links.sh >> /var/log/streamflix-auto-fix.log 2>&1
+```
+
+Los minutos están repartidos a propósito: los tres importan y competirían por el
+mismo servidor.
+
+**Anime** (`vigilar_emision.js`) va con calendario: AniList publica
+`nextAiringEpisode`, así que sabe que el capítulo 7 sale el sábado y espera un
+margen de cortesía antes de ir a por él.
+
+**Series** (`vigilar_series.js`) no puede: el calendario de TMDB está tras su API
+y aquí no hay clave. Así que pregunta a quien de verdad manda — el sitio del que
+se baja — probando el capítulo siguiente. Da igual que la televisión haya emitido
+el 6 si la web de origen no lo ha subido: lo único importable es lo publicado.
+
+```bash
+/opt/streamflix/vigilar_series.sh --registrar "The Last of Us"    # empezar a vigilarla
+/opt/streamflix/vigilar_series.sh --registrar "Loki" --temporada 2  # si no es la última
+/opt/streamflix/vigilar_series.sh --listar                        # qué hay vigilado
+/opt/streamflix/vigilar_series.sh --olvidar "The Last of Us"
+/opt/streamflix/vigilar_series.sh                                 # lo que hace el cron
+```
+
+Solo vigila lo que se registre: una serie terminada no tiene nada que esperar y
+revisarla cada hora es gastar el rato en preguntar por un capítulo que no existe.
+
+Dos detalles del diseño, ambos por algo que pasó:
+
+- **Nunca abandona una serie.** Tras `SERIES_MAX_INTENTOS` fallos (8) baja el
+  ritmo a una revisión cada `SERIES_ESPERA_LARGA_H` horas (12), pero sigue
+  mirando. El vigilante de anime sí abandona, y por eso *Tomb Raider King* se
+  quedó una semana congelado en el capítulo 4: un error de código gastó los ocho
+  intentos y la serie salió de la rotación sin que nada lo dijera. Una serie
+  semanal falla ~24 veces entre capítulo y capítulo, así que ahí abandonar por
+  número de fallos sería el comportamiento normal, no la excepción.
+- **Tope de `SERIES_MAX_POR_VUELTA` (3) capítulos por serie y vuelta**, para que
+  una con veinte pendientes no monopolice la hora y deje al resto sin revisar.
+  Lo que quede sigue en la vuelta siguiente.
+
+El estado vive en `dbo.SerieEmision` y se consulta con `--listar`: temporada
+vigilada, por qué capítulo va, cuántos intentos lleva y el motivo del último.
+
 ## 4. Proxy inverso
 
 La app escucha solo en `127.0.0.1:3000`. Delante va nginx o Caddy con el
