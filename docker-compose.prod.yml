@@ -60,6 +60,13 @@ services:
       # .env y, si faltan, la solicitud se guarda igual y no se avisa.
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID:-}"
+    # Los banners del carrusel los genera `generate-backdrops.js` dentro de este
+    # contenedor. Sin montar la carpeta, se escribían en su capa efímera y la
+    # siguiente reconstrucción se los llevaba, dejando en la base URLs de
+    # /media/backdrops que ya no existían. Montada, quedan en el host, que es
+    # además lo que el rsync del despliegue excluye a propósito.
+    volumes:
+      - ./media:/app/media
     # Solo escucha en localhost del host: el acceso público entra por el
     # proxy inverso (nginx/Caddy), que es quien pone HTTPS.
     ports:

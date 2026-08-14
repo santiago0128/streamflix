@@ -96,7 +96,11 @@ button { font-family: inherit; cursor: pointer; }
 }
 .hero-nav:hover { transform: scale(1.05); border-color: rgba(197,155,255,.7); background: rgba(31,18,58,.72); }
 .hero-content {
-  position: relative; z-index: 3; padding: 0 40px 56px; max-width: 700px;
+  /* El hueco de la izquierda es el de la flecha de «anterior»: la rail deja
+     28 px de margen y el botón mide 48, así que con el padding de 40 el botón
+     caía encima de la etiqueta y del título — se veía mal y, sobre todo, no
+     había forma de pulsarlo sin darle al texto. */
+  position: relative; z-index: 3; padding: 0 40px 56px 104px; max-width: 760px;
   animation: heroReveal .65s ease both;
 }
 .hero-badge {
@@ -665,7 +669,11 @@ button { font-family: inherit; cursor: pointer; }
   .search-box input { width: auto; flex: 1; }
 
   .hero { height: 52vh; min-height: 300px; }
-  .hero-content { padding: 0 18px 28px; max-width: none; }
+  /* En el móvil el choque era el mismo, pero ahí 104 px de sangrado se comen
+     un cuarto de la pantalla: se encoge la flecha y se aparta menos. */
+  .hero-rail { padding: 0 10px; }
+  .hero-nav { width: 38px; height: 38px; font-size: 22px; }
+  .hero-content { padding: 0 18px 28px 58px; max-width: none; }
   .hero-content h1 { font-size: 26px; }
   .hero-desc { font-size: 14px; margin-bottom: 16px; }
   .hero-actions { flex-wrap: wrap; }

@@ -47,7 +47,12 @@ const TMDB_TITLE_ALIASES = new Map([
   ['guardianes de la galaxia', ['Guardians of the Galaxy']],
   ['piratas del caribe la maldicion de la perla negra', ['Pirates of the Caribbean: The Curse of the Black Pearl']],
   ['harry potter y la piedra filosofal', ["Harry Potter and the Philosopher's Stone"]],
-  ['avatar el camino del agua', ['Avatar: The Way of Water']]
+  ['avatar el camino del agua', ['Avatar: The Way of Water']],
+  // Un título corto y común es el peor caso del buscador: «Origen» a secas
+  // ganaba «Fallas de Origen», que es otra película del mismo año, y la ficha se
+  // habría quedado con esa carátula sin que nada lo delatara.
+  ['origen', ['Inception']],
+  ['top gun maverick', ['Top Gun: Maverick']]
 ]);
 
 const matchCache = new Map();

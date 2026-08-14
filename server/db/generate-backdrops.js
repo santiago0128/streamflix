@@ -11,8 +11,12 @@ const { fetchAnimeArtwork } = require('./anilist');
 const sharp = require('sharp');
 const MEDIA_DIR = path.join(__dirname, '..', '..', 'media');
 const BACKDROPS_DIR = path.join(MEDIA_DIR, 'backdrops');
-const TARGET_WIDTH = 1920;
-const TARGET_HEIGHT = 1080;
+// El banner ocupa el ancho entero de la ventana (64vh de alto, `cover`), así que
+// en un portátil retina son unos 4000 píxeles de pantalla. Con 1920 se veía
+// blando por pura falta de resolución; 2560 llega bien y sigue pesando poco
+// porque estas fotos comprimen muy bien.
+const TARGET_WIDTH = 2560;
+const TARGET_HEIGHT = 1440;
 const tmdbArtworkCache = new Map();
 const BACKDROP_OVERRIDES = new Map([
   ['el padrino', 'https://media.themoviedb.org/t/p/w1066_and_h600_face/tSPT36ZKlP2WVHJLM4cQPLSzv3b.jpg'],
@@ -83,6 +87,20 @@ function extractTmdbBackdropUrl(html) {
   return null;
 }
 
+/**
+ * Sube una URL de TMDB a su tamaño original.
+ *
+ * Las que aparecen en la página vienen recortadas para la propia web
+ * (`/t/p/w1066_and_h600_face/…`, 1066 px de ancho). Bajar esa y estirarla a
+ * 2560 es agrandar un JPEG pequeño: exactamente la pixelación que se veía en el
+ * banner. TMDB guarda el mismo fichero en `/t/p/original/`, que suele ser de
+ * 1920 o 3840, y de ahí se reduce en vez de ampliar.
+ */
+function enResolucionOriginal(url) {
+  if (!/\/t\/p\/[^/]+\//.test(String(url || ''))) return url;
+  return url.replace(/\/t\/p\/[^/]+\//, '/t/p/original/');
+}
+
 async function fetchTmdbArtwork(series) {
   const cacheKey = `${series.ContentType}|${series.Title}|${series.ReleaseYear || ''}`;
   if (tmdbArtworkCache.has(cacheKey)) return tmdbArtworkCache.get(cacheKey);
@@ -112,15 +130,19 @@ async function chooseSourceUrl(series) {
   }
 
   if (series.ContentType === 'anime') {
-    // Si AniList no contesta se sigue con TMDB: aquí un banner es un extra, y
-    // quedarse sin ninguno por un corte de red sería peor.
-    const animeArtwork = await fetchAnimeArtwork(series).catch(() => null);
-    if (animeArtwork?.backdropUrl) {
-      return animeArtwork.backdropUrl;
-    }
+    // TMDB primero también en anime, y no por gusto: el banner de AniList mide
+    // unos 1900×400, y encajarlo en 16:9 obliga a triplicar su altura. Se veía
+    // igual de blando que la miniatura que veníamos arrastrando. El backdrop de
+    // TMDB ya viene en 16:9 y se reduce, que es lo que se quiere.
+    // AniList se queda de respaldo: si no hay ficha en TMDB, mejor su banner
+    // que nada.
     const tmdbArtwork = await fetchTmdbArtwork(series);
     if (tmdbArtwork?.backdropUrl) {
       return tmdbArtwork.backdropUrl;
+    }
+    const animeArtwork = await fetchAnimeArtwork(series).catch(() => null);
+    if (animeArtwork?.backdropUrl) {
+      return animeArtwork.backdropUrl;
     }
     if (animeArtwork?.posterUrl) {
       return animeArtwork.posterUrl;
@@ -207,10 +229,11 @@ async function ensureBackdropFromFile(inputFile, outputFile) {
 }
 
 async function createBackdrop(series) {
-  const sourceUrl = await chooseSourceUrl(series);
-  if (!sourceUrl) {
+  const elegida = await chooseSourceUrl(series);
+  if (!elegida) {
     return { ok: false, reason: 'sin imagen origen' };
   }
+  const sourceUrl = enResolucionOriginal(elegida);
 
   const fileBase = `${String(series.Id).padStart(4, '0')}-${slugify(series.Title)}`;
   const targetRelativeUrl = `/media/backdrops/${fileBase}.jpg`;
