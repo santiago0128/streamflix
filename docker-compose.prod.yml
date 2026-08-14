@@ -98,5 +98,46 @@ services:
     # competir por memoria con la base.
     mem_limit: 512m
 
+  # Atiende la cola de solicitudes en segundo plano, de una en una y en cuanto
+  # entran. Antes lo lanzaba un cron cada hora: una solicitud hecha justo
+  # despues del turno esperaba casi una hora a que alguien la mirase, y la
+  # gracia de pedir algo es tenerlo pronto. Como servicio, el retardo es el
+  # intervalo de sondeo.
+  #
+  # Va en su propio contenedor y no dentro del bot de Telegram porque una
+  # importacion son decenas de descargas de minutos: compartiendo proceso,
+  # cualquier /pide se quedaba esperando a que terminara.
+  solicitudes:
+    image: streamflix-bot
+    container_name: streamflix-solicitudes
+    command: procesar_solicitudes.js --vigilar
+    environment:
+      STREAMFLIX_ROOT: /streamflix
+      JK_NO_BROWSER: "1"
+      STREAMFLIX_PROGRESS_FILE: /estado/progreso.json
+      # El cerrojo que impide dos importaciones a la vez vive en TMPDIR. Apunta
+      # al directorio compartido del host para que tambien lo vea una ejecucion
+      # lanzada a mano desde fuera del contenedor.
+      TMPDIR: /estado
+      DB_SERVER: streamflix-sql
+      DB_PORT: "1433"
+    volumes:
+      - ./.env:/streamflix/.env:ro
+      - /opt/streamflix/estado:/estado
+      # El codigo del bot se monta del host, igual que en los cron: asi un
+      # cambio en el worker no obliga a reconstruir la imagen.
+      - /opt/streamflix/jk-anime-launcher:/bot
+    working_dir: /bot
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    restart: unless-stopped
+    # Una importacion en curso no puede morir por un apagado brusco: se le da
+    # margen para cerrar y devolver la solicitud a la cola.
+    stop_grace_period: 30s
+    mem_limit: 1g
+
 volumes:
   streamflix-data:

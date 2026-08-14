@@ -131,20 +131,38 @@ queda en `pendiente` hasta que alguien lo atiende. De eso se encarga
 orden de llegada, lanza el importador y deja cada una en `listo` o `rechazada`,
 avisando por Telegram del resultado.
 
-**Lo automático lo lleva el cron del servidor**, junto a los otros dos trabajos:
+**Lo atiende un servicio en segundo plano**, `solicitudes` en
+`docker-compose.prod.yml`, que corre `procesar_solicitudes.js --vigilar`: drena
+la cola, espera unos segundos y vuelve a mirar. Una solicitud entra en
+importación a los segundos de hacerse.
 
-```cron
-35 * * * * /opt/streamflix/procesar_solicitudes.sh >> /var/log/streamflix-solicitudes.log 2>&1
+```bash
+docker compose -f docker-compose.prod.yml logs -f solicitudes   # qué está haciendo
+docker compose -f docker-compose.prod.yml restart solicitudes   # tras tocar el worker
 ```
 
-El minuto :35 no es capricho: `vigilar_emision` va al :20 y `auto_fix_links` al
-:50, y los tres importan compitiendo por el mismo servidor.
+Antes esto era un cron horario, y ahí estaba el problema: quien pedía algo justo
+después del turno esperaba cincuenta y nueve minutos a que alguien lo mirase, sin
+que nada estuviera ocupado. El intervalo de sondeo se cambia con
+`SOLICITUDES_INTERVALO_SEG` (15 s por defecto); la consulta es un `TOP 1` sobre un
+índice, así que sondear seguido no cuesta nada.
 
-A mano es el mismo script, y admite los mismos argumentos:
+Sigue procesando **de una en una**: veinte importaciones a la vez son veinte
+descargas compitiendo por el mismo servidor.
+
+Dos detalles que evitan que la cola se atasque sola:
+
+- **Apagado ordenado.** Con `docker stop` (SIGTERM) corta la importación en curso
+  y devuelve esa solicitud a `pendiente` en vez de dejarla en `en curso`, que es
+  un estado del que no sale sola. Por eso el servicio tiene
+  `stop_grace_period: 30s`.
+- **Rescate al arrancar.** Si el proceso muere de golpe —OOM, reinicio del
+  servidor—, lo que quedara `en curso` vuelve a la cola en el siguiente arranque.
+
+A mano, sin parar el servicio (el cerrojo compartido evita que se pisen):
 
 ```bash
 /opt/streamflix/procesar_solicitudes.sh --dry-run   # qué haría, sin tocar nada
-/opt/streamflix/procesar_solicitudes.sh             # atiende la cola
 /opt/streamflix/procesar_solicitudes.sh --max=3     # solo las tres primeras
 ```
 
@@ -159,6 +177,11 @@ cola. Así estuvo la cola desde que se creó —el `schedule` de Actions lo lanz
 en el host— y no se notaba porque las solicitudes se quedaban en `pendiente`,
 que es indistinguible de «nadie ha pedido nada». Si algún día hay que tocarlo,
 copiar el patrón de `vigilar_emision.sh`.
+
+El servicio monta el código del bot desde el host, así que un cambio en el worker
+no obliga a reconstruir la imagen — pero sí a **reiniciar el contenedor**: es un
+proceso largo y se queda con el código que cargó al arrancar. `deploy.sh bot` ya
+lo recrea junto al bot de Telegram.
 
 El bot vive en **su propio repositorio** y el despliegue de la web no lo toca.
 Si `/opt/streamflix/jk-anime-launcher` no es un clon de git, el `git pull` de la
