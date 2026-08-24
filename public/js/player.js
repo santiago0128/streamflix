@@ -6,6 +6,7 @@ const Player = (() => {
   const videoEmbed = document.getElementById('videoEmbed');
   const playerControls = document.getElementById('playerControls');
   const titleEl = document.getElementById('playerTitle');
+  const playerAudioNotice = document.getElementById('playerAudioNotice');
 
   const skipIntroBtn = document.getElementById('skipIntroBtn');
   const nextEpBtn = document.getElementById('nextEpBtn');
@@ -384,6 +385,8 @@ const Player = (() => {
     audioTrackSelect.innerHTML = '';
 
     if (options.length < 2) {
+      setAudioNotice('');
+      audioTrackSelect.classList.remove('is-fallback');
       audioTrackSelect.hidden = true;
       return;
     }
@@ -413,7 +416,19 @@ const Player = (() => {
     audioTrackSelect.title = playback?.audioFallback
       ? `Este capítulo no está en ${etiqueta(preferredAudio)}: suena en ${etiqueta(sonando)}`
       : 'Idioma de audio';
+    setAudioNotice(
+      playback?.audioFallback
+        ? `Este capítulo no tiene ${etiqueta(preferredAudio)} disponible. Se está reproduciendo en ${etiqueta(sonando)}.`
+        : ''
+    );
+    audioTrackSelect.classList.toggle('is-fallback', Boolean(playback?.audioFallback));
     audioTrackSelect.hidden = false;
+  }
+
+  function setAudioNotice(message = '') {
+    if (!playerAudioNotice) return;
+    playerAudioNotice.textContent = message || '';
+    playerAudioNotice.hidden = !message;
   }
 
   async function load() {
@@ -422,6 +437,8 @@ const Player = (() => {
     const currentLoad = ++loadSequence;
     persistProgress(true);
     teardownSource();
+    setAudioNotice('');
+    audioTrackSelect.classList.remove('is-fallback');
 
     titleEl.textContent = `${seriesTitle} — E${ep.EpisodeNumber}: ${ep.Title}`;
     syncEpSelection();
@@ -430,6 +447,7 @@ const Player = (() => {
     nextEpBtn.hidden = true;
     btnPrev.disabled = index === 0;
     btnNext.disabled = !hasNext();
+    btnNext.title = hasNext() ? 'Siguiente episodio' : 'No hay más episodios';
     // En una película no hay siguiente nunca: el botón sobra, no se desactiva.
     btnNextCenter.hidden = playlist.length < 2;
     btnNextCenter.disabled = !hasNext();

@@ -252,8 +252,11 @@ async function main() {
       }
     }
 
+    // --revisar ahora comprueba también la identidad, no solo que la URL dé
+    // 200. Una portada de otra película en image.tmdb.org está perfectamente
+    // viva y por eso el chequeo antiguo la declaraba buena para siempre.
     const rows = result.recordset.filter((series) =>
-      args.force || muertas.has(series.Id) || !yaEsBuena(series.PosterUrl));
+      args.force || args.revisar || muertas.has(series.Id) || !yaEsBuena(series.PosterUrl));
     const yaMigradas = result.recordset.length - rows.length;
     const etiquetaTipos = args.types.join(', ');
 
@@ -270,6 +273,7 @@ async function main() {
     const fallidas = [];
     const dudosas = [];
     let actualizadas = 0;
+    let validadas = 0;
 
     for (const series of rows) {
       const outcome = await resolvePoster(series);
@@ -285,6 +289,14 @@ async function main() {
         console.log(
           `⚠ [${series.ContentType}] #${series.Id} ${series.Title} (${series.ReleaseYear}) — ` +
           `omitida: casa con ${outcome.match.title} (${outcome.match.year}), ${outcome.desfase} años de desfase`
+        );
+        continue;
+      }
+
+      if (String(series.PosterUrl || '') === String(outcome.url || '')) {
+        validadas += 1;
+        console.log(
+          `✓ [${series.ContentType}] #${series.Id} ${series.Title} — identidad y portada verificadas (${outcome.origen})`
         );
         continue;
       }
@@ -310,7 +322,10 @@ async function main() {
       console.log(`      ahora: ${outcome.url}  [${kb(outcome.bytes)}]`);
     }
 
-    console.log(`\nResumen: ${actualizadas} ${args.apply ? 'actualizada(s)' : 'lista(s) para actualizar'}, ${fallidas.length} omitida(s).`);
+    console.log(
+      `\nResumen: ${actualizadas} ${args.apply ? 'actualizada(s)' : 'lista(s) para actualizar'}, ` +
+      `${validadas} ya correcta(s), ${fallidas.length} omitida(s).`
+    );
 
     if (fallidas.length) {
       console.log('\nSin portada nueva (conservan la que ya tenían):');

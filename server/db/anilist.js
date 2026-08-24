@@ -13,8 +13,11 @@ const { normalizeSearchTitle } = require('./tmdb');
 
 const ANILIST_API = 'https://graphql.anilist.co';
 const USER_AGENT = 'NoxisArtwork/1.0';
-// AniList admite 90 peticiones por minuto: una cada 700 ms no se acerca.
-const MIN_REQUEST_GAP_MS = 700;
+// El límite público de AniList puede bajar temporalmente (en producción se ha
+// observado a 30/min). Dos segundos largos funcionan tanto con ese límite como
+// con el normal y evitan que media revisión se interprete como "sin ficha".
+const MIN_REQUEST_GAP_MS = 2200;
+const MAX_RETRIES = 4;
 
 const artworkCache = new Map();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -82,6 +85,10 @@ function postJson(url, payload) {
           if (status >= 400) {
             const error = new Error(`AniList HTTP ${status}`);
             error.status = status;
+            const retryAfter = Number(res.headers['retry-after']);
+            error.retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0
+              ? retryAfter * 1000
+              : 0;
             return reject(error);
           }
           try {
@@ -96,6 +103,22 @@ function postJson(url, payload) {
     req.on('error', reject);
     req.end(body);
   });
+}
+
+async function requestAniList(payload) {
+  let lastError;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+    try {
+      return await encolar(() => postJson(ANILIST_API, payload));
+    } catch (error) {
+      lastError = error;
+      const transient = !error.status || error.status === 429 || error.status >= 500;
+      if (!transient || attempt === MAX_RETRIES - 1) throw error;
+      const backoff = 3000 * 2 ** attempt;
+      await sleep(Math.max(error.retryAfterMs || 0, backoff));
+    }
+  }
+  throw lastError;
 }
 
 const CONSULTA = `
@@ -125,9 +148,11 @@ function esElMismo(media, series) {
     .map(normalizeSearchTitle)
     .filter(Boolean);
 
-  return candidatos.some((candidato) =>
-    variantes.some((variante) =>
-      variante === candidato || variante.includes(candidato) || candidato.includes(variante)));
+  // "Bleach" está contenido en los títulos de todas sus secuelas, pero no son
+  // la misma ficha ni usan la misma portada. La contención servía como atajo y
+  // era precisamente lo que mezclaba temporadas/franquicias; solo se acepta un
+  // nombre oficial completo.
+  return candidatos.some((candidato) => variantes.includes(candidato));
 }
 
 /**
@@ -145,7 +170,7 @@ async function fetchAnimeArtwork(series) {
     return null;
   }
 
-  const response = await encolar(() => postJson(ANILIST_API, { query: CONSULTA, variables: { search } }));
+  const response = await requestAniList({ query: CONSULTA, variables: { search } });
   const media = response?.data?.Media || null;
   if (!media || !esElMismo(media, series)) {
     artworkCache.set(cacheKey, null);
@@ -163,4 +188,4 @@ async function fetchAnimeArtwork(series) {
   return artwork;
 }
 
-module.exports = { fetchAnimeArtwork, normalizeAnimeSearchTitle };
+module.exports = { esElMismo, fetchAnimeArtwork, normalizeAnimeSearchTitle };

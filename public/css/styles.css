@@ -230,10 +230,23 @@ button { font-family: inherit; cursor: pointer; }
 /* Reproductor de terceros (Provider = 'embed') */
 .player-stage .player-embed { width: 100%; height: 100%; border: 0; background: #000; }
 
-.player-title { position: absolute; top: 22px; left: 74px; right: 74px; font-size: 18px; font-weight: 600;
-  text-shadow: 0 2px 8px rgba(0,0,0,.9); pointer-events: none;
-  opacity: 1; transition: opacity .3s; }
+.player-title-wrap { position: absolute; top: 22px; left: 74px; right: 74px; z-index: 3; }
+.player-title { font-size: 18px; font-weight: 600; text-shadow: 0 2px 8px rgba(0,0,0,.9);
+  pointer-events: none; opacity: 1; transition: opacity .3s; }
+.player-audio-notice {
+  margin-top: 8px; display: inline-flex; align-items: center; gap: 8px;
+  max-width: min(620px, 100%); padding: 8px 12px; border-radius: 999px;
+  background: rgba(34, 20, 54, .78); border: 1px solid rgba(184, 130, 255, .36);
+  color: #f3e9ff; font-size: 13px; line-height: 1.35;
+  box-shadow: 0 10px 30px rgba(0,0,0,.28); backdrop-filter: blur(12px);
+}
+.player-audio-notice::before {
+  content: 'Audio'; padding: 2px 8px; border-radius: 999px;
+  background: rgba(139, 92, 246, .24); color: #d9c3ff; font-size: 11px;
+  font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+}
 .player-stage.hide-ui .player-title,
+.player-stage.hide-ui .player-audio-notice,
 .player-stage.hide-ui .player-controls { opacity: 0; pointer-events: none; }
 .player-stage.hide-ui { cursor: none; }
 
@@ -265,8 +278,20 @@ button { font-family: inherit; cursor: pointer; }
 .ctrl:disabled:hover { opacity: .3; transform: none; }
 .ctrl-spacer { flex: 1; }
 .time { font-size: 13px; color: #ddd; font-variant-numeric: tabular-nums; }
+.next-episode-control {
+  display: inline-flex; align-items: center; gap: 7px; width: auto;
+  padding: 7px 12px; border-radius: 999px; background: rgba(139, 92, 246, .24);
+  border: 1px solid rgba(184, 130, 255, .38); color: #fff; font-size: 13px;
+}
+.next-episode-control:hover:not(:disabled) { background: rgba(139, 92, 246, .42); }
+.next-episode-control:disabled { opacity: .35; cursor: default; }
 .audio-quick-select { background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.22);
   border-radius: 999px; padding: 7px 12px; font-size: 13px; min-width: 120px; }
+.audio-quick-select.is-fallback {
+  border-color: rgba(184, 130, 255, .6);
+  box-shadow: 0 0 0 1px rgba(184, 130, 255, .22);
+  background: rgba(90, 43, 145, .28);
+}
 .audio-quick-select option { background: #1b1030; }
 
 /* ---- Lista de capítulos del reproductor ---- */
@@ -431,9 +456,14 @@ button { font-family: inherit; cursor: pointer; }
   .progress::before { content: ''; position: absolute; inset: -14px 0; }
   .progress-played::after { width: 16px; height: 16px; right: -8px; }
 
-  .player-title {
+  .player-title-wrap {
     top: max(14px, env(safe-area-inset-top)); left: 68px; right: 16px;
+  }
+  .player-title {
     font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .player-audio-notice {
+    max-width: 100%; font-size: 12px; padding: 7px 10px;
   }
   .player-close {
     top: max(12px, env(safe-area-inset-top));

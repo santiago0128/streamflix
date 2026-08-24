@@ -16,7 +16,7 @@ const https = require('https');
 
 const TMDB_BASE_URL = 'https://www.themoviedb.org';
 const USER_AGENT = 'NoxisArtwork/1.0';
-const MIN_REQUEST_GAP_MS = 400;
+const MIN_REQUEST_GAP_MS = 800;
 
 // El catálogo está en español y TMDB busca mejor por el título original. Sin
 // esto, "El padrino" devuelve documentales y "Matrix" devuelve cualquier cosa.
@@ -105,6 +105,10 @@ function get(url, redirects = 5) {
           res.resume();
           const error = new Error(`HTTP ${status}`);
           error.status = status;
+          const retryAfter = Number(res.headers['retry-after']);
+          error.retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0
+            ? retryAfter * 1000
+            : 0;
           return reject(error);
         }
 
@@ -155,13 +159,13 @@ const esPasajero = (error) => !error.status || error.status === 429 || error.sta
 
 async function requestText(url) {
   let ultimoError;
-  for (let intento = 0; intento < 3; intento += 1) {
+  for (let intento = 0; intento < 4; intento += 1) {
     try {
       return await encolar(() => get(url));
     } catch (error) {
       ultimoError = error;
       if (!esPasajero(error)) throw error;
-      await sleep(700 * 2 ** intento);
+      await sleep(Math.max(error.retryAfterMs || 0, 2000 * 2 ** intento));
     }
   }
   throw ultimoError;
@@ -214,6 +218,32 @@ function scoreTmdbCandidate(candidate, series, titleVariants) {
   return score;
 }
 
+function isCompatibleMediaType(candidate, series) {
+  return (series.ContentType === 'series' && candidate.mediaType === 'tv') ||
+    (series.ContentType === 'movie' && candidate.mediaType === 'movie') ||
+    // El anime puede aparecer como serie o película; su identidad principal se
+    // valida en AniList y TMDB solo es el respaldo gráfico.
+    series.ContentType === 'anime';
+}
+
+function isStrongTitleMatch(candidate, series, titleVariants) {
+  const candidateTitle = normalizeSearchTitle(candidate.title);
+  const variants = (titleVariants && titleVariants.length
+    ? titleVariants
+    : getTmdbSearchQueries(series).map(normalizeSearchTitle)
+  ).filter(Boolean);
+
+  // El tipo correcto no demuestra identidad. Antes daba 40 puntos, justo el
+  // umbral de aceptación, de modo que el primer resultado "movie" podía ganar
+  // aunque su título no tuviera una sola palabra en común con lo buscado.
+  if (!candidateTitle || !variants.includes(candidateTitle)) return false;
+
+  if (series.ReleaseYear && candidate.year) {
+    return Math.abs(series.ReleaseYear - candidate.year) <= 1;
+  }
+  return true;
+}
+
 function parseTmdbSearchResults(html) {
   const candidates = [];
   const pattern = /data-media-type="(tv|movie)"[\s\S]*?href="\/(tv|movie)\/([^"]+)"[\s\S]*?<h2[^>]*><span>([^<]+)<\/span><\/h2>[\s\S]*?<span class="release_date w-full font-light">([^<]*)<\/span>/g;
@@ -260,18 +290,21 @@ async function findTmdbMatch(series) {
     // El título original acierta más que la traducción, pero solo cuando el
     // alias existe: por eso la ventaja baja con cada intento posterior.
     const queryBonus = index === 0 ? 0 : Math.max(20 - index * 5, 5);
-    candidates.push(
-      ...parseTmdbSearchResults(searchHtml).map((candidate) => ({
+    candidates.push(...parseTmdbSearchResults(searchHtml)
+      .filter((candidate) =>
+        isCompatibleMediaType(candidate, series) && isStrongTitleMatch(candidate, series, variants))
+      .map((candidate) => ({
         ...candidate,
         score: scoreTmdbCandidate(candidate, series, variants) + queryBonus
       }))
     );
   }
 
-  candidates.sort((left, right) => right.score - left.score);
+  const unique = [...new Map(candidates.map((candidate) => [candidate.path, candidate])).values()];
+  unique.sort((left, right) => right.score - left.score);
 
-  const best = candidates[0];
-  const match = !best || best.score < 40 ? null : best;
+  const best = unique[0];
+  const match = best || null;
   matchCache.set(cacheKey, match);
   return match;
 }
@@ -286,5 +319,7 @@ module.exports = {
   parseReleaseYear,
   parseTmdbSearchResults,
   requestText,
-  scoreTmdbCandidate
+  scoreTmdbCandidate,
+  isCompatibleMediaType,
+  isStrongTitleMatch
 };

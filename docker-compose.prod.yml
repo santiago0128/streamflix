@@ -60,6 +60,11 @@ services:
       # .env y, si faltan, la solicitud se guarda igual y no se avisa.
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID:-}"
+
+      # Permite reconocer películas/series aunque se soliciten con el título
+      # original en otro idioma. Sin clave sigue funcionando la comparación
+      # local; el anime usa AniList y no necesita credenciales.
+      TMDB_API_KEY: "${TMDB_API_KEY:-}"
     # Los banners del carrusel los genera `generate-backdrops.js` dentro de este
     # contenedor. Sin montar la carpeta, se escribían en su capa efímera y la
     # siguiente reconstrucción se los llevaba, dejando en la base URLs de

@@ -38,6 +38,41 @@ CREATE TABLE dbo.Series (
 IF COL_LENGTH('dbo.Series', 'SourceRef') IS NULL
     ALTER TABLE dbo.Series ADD SourceRef NVARCHAR(100) NULL;
 
+-- Identidad estable del catálogo oficial (ej. anilist:151807 o
+-- tmdb:movie:27205). SourceRef dice de dónde se obtuvo el vídeo y puede cambiar
+-- al usar un sitio de respaldo; CanonicalRef dice qué obra es. Separarlas evita
+-- que el mismo anime entre otra vez con el título japonés, inglés o romaji.
+IF COL_LENGTH('dbo.Series', 'CanonicalRef') IS NULL
+    ALTER TABLE dbo.Series ADD CanonicalRef NVARCHAR(100) NULL;
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = 'UQ_Series_CanonicalRef' AND object_id = OBJECT_ID('dbo.Series')
+)
+    EXEC(N'CREATE UNIQUE INDEX UQ_Series_CanonicalRef
+        ON dbo.Series (CanonicalRef)
+        WHERE CanonicalRef IS NOT NULL;');
+
+-- Nombres alternativos conocidos de una obra. AliasNormalized se genera en la
+-- aplicación sin acentos, puntuación ni diferencias de mayúsculas; por eso una
+-- petición en otro idioma se puede contrastar sin pedirle a la IA que decida a
+-- ciegas sobre cada fila del catálogo.
+IF OBJECT_ID('dbo.SeriesAliases', 'U') IS NULL
+CREATE TABLE dbo.SeriesAliases (
+    SeriesId       INT NOT NULL,
+    Alias           NVARCHAR(500) NOT NULL,
+    AliasNormalized NVARCHAR(500) NOT NULL,
+    CreatedAt       DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_SeriesAliases PRIMARY KEY (SeriesId, AliasNormalized),
+    CONSTRAINT FK_SeriesAliases_Series FOREIGN KEY (SeriesId) REFERENCES dbo.Series(Id) ON DELETE CASCADE
+);
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = 'IX_SeriesAliases_Normalized' AND object_id = OBJECT_ID('dbo.SeriesAliases')
+)
+    CREATE INDEX IX_SeriesAliases_Normalized ON dbo.SeriesAliases (AliasNormalized);
+
 -- Tipo de contenido principal:
 --   'anime'  = solo títulos importados desde páginas de anime (JKAnime)
 --   'series' = serie convencional

@@ -1112,11 +1112,24 @@ function audioSeleccionado(audioEpisodio, requestedAudio) {
   return audioEpisodio[0]?.code || null;
 }
 
+function audiosAIntentar(audioEpisodio, requestedAudio) {
+  const preferred = audioSeleccionado(audioEpisodio, requestedAudio);
+  const disponibles = audioEpisodio.map((option) => option.code).filter(Boolean);
+  const ordered = [];
+
+  if (preferred) ordered.push(preferred);
+  for (const code of disponibles) {
+    if (!ordered.includes(code)) ordered.push(code);
+  }
+
+  return ordered.length ? ordered : [null];
+}
+
 async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = undefined) {
   const snapshot = providedSnapshot === undefined ? await findEpisodeSnapshot(pool, episode) : providedSnapshot;
   const audioEpisodio = collectAudioOptions(snapshot);
   const requestedAudio = audioPreferenceFromReq(req);
-  const selectedAudio = audioSeleccionado(audioEpisodio, requestedAudio);
+  const audiosIntento = audiosAIntentar(audioEpisodio, requestedAudio);
 
   // El selector se dibuja con los idiomas de la temporada, no con los de este
   // capítulo: si no, aparece y desaparece al pasar de capítulo. Cuando no se
@@ -1131,50 +1144,53 @@ async function resolveEpisodePlayback(req, pool, episode, providedSnapshot = und
     ? ordenarAudios([...audioTemporada, ...audioEpisodio].map((option) => option.code))
     : audioEpisodio;
   const audioDisponible = audioEpisodio.map((option) => option.code);
-  const comoRespuesta = (fuente, refreshed) => ({
+  const comoRespuesta = (fuente, refreshed, audioCode) => ({
     provider: fuente.provider || 'file',
-    url: buildPlaybackUrl(req, episode.Id, { audio: selectedAudio }),
+    url: buildPlaybackUrl(req, episode.Id, { audio: audioCode }),
     proxied: true,
     sourceUrl: fuente.url,
     referer: fuente.referer,
     contentType: fuente.contentType,
     refreshed,
     canTrackProgress: true,
-    audio: selectedAudio,
+    audio: audioCode,
     audioOptions,
     audioDisponible,
     // Avisa de que suena otro idioma del pedido, para que el reproductor lo
     // enseñe sin dar por perdida la preferencia del usuario.
-    audioFallback: Boolean(requestedAudio && selectedAudio !== requestedAudio)
+    audioFallback: Boolean(requestedAudio && audioCode !== requestedAudio)
   });
 
-  // Abrir la ficha de un anime ya resuelve la reproducción para saber qué
-  // idiomas hay, y al darle a reproducir se resolvía otra vez, y una tercera al
-  // pedir el manifiesto. Eran tres scrapings completos antes del primer
-  // fotograma; ahora los tres comparten este resultado.
-  const cacheada = leerResolucion(episode.Id, selectedAudio);
-  if (cacheada) {
-    return comoRespuesta(cacheada, false);
-  }
+  for (const audioCode of audiosIntento) {
+    // Abrir la ficha de un anime ya resuelve la reproducción para saber qué
+    // idiomas hay, y al darle a reproducir se resolvía otra vez, y una tercera al
+    // pedir el manifiesto. Eran tres scrapings completos antes del primer
+    // fotograma; ahora los tres comparten este resultado.
+    const cacheada = leerResolucion(episode.Id, audioCode);
+    if (cacheada) {
+      return comoRespuesta(cacheada, false, audioCode);
+    }
 
-  const preferredRefresh = selectedAudio ? await refreshVideoSourceFromSnapshot(snapshot, selectedAudio) : null;
-  const direct = preferredRefresh ? null : await resolveDirectVideoCandidate(snapshot, episode, selectedAudio);
+    const preferredRefresh = audioCode ? await refreshVideoSourceFromSnapshot(snapshot, audioCode) : null;
+    const direct = preferredRefresh ? null : await resolveDirectVideoCandidate(snapshot, episode, audioCode);
 
-  if (preferredRefresh) {
-    return comoRespuesta(guardarResolucion(episode.Id, selectedAudio, preferredRefresh), true);
-  }
+    if (preferredRefresh) {
+      return comoRespuesta(guardarResolucion(episode.Id, audioCode, preferredRefresh), true, audioCode);
+    }
 
-  if (direct) {
-    return comoRespuesta(guardarResolucion(episode.Id, selectedAudio, direct), false);
-  }
+    if (direct) {
+      return comoRespuesta(guardarResolucion(episode.Id, audioCode, direct), false, audioCode);
+    }
 
-  if (snapshot) {
-    const refreshed = await refreshVideoSourceFromSnapshot(snapshot, selectedAudio);
-    if (refreshed) {
-      return comoRespuesta(guardarResolucion(episode.Id, selectedAudio, refreshed), true);
+    if (snapshot) {
+      const refreshed = await refreshVideoSourceFromSnapshot(snapshot, audioCode);
+      if (refreshed) {
+        return comoRespuesta(guardarResolucion(episode.Id, audioCode, refreshed), true, audioCode);
+      }
     }
   }
 
+  const selectedAudio = audiosIntento[0] || null;
   const fallbackUrl = fallbackEmbedUrl(snapshot, episode, selectedAudio);
   if (fallbackUrl) {
     return {
@@ -1277,6 +1293,11 @@ const SERIES_WHERE = `
 // página y el total, que es lo que piden los carruseles del inicio (10 por tipo)
 // y el listado paginado.
 router.get('/series', async (req, res) => {
+  // El catálogo cambia también por tareas de mantenimiento (por ejemplo, la
+  // corrección de portadas). No debe quedarse una respuesta anterior en el
+  // caché del navegador después de que la base ya fue actualizada.
+  res.setHeader('cache-control', 'no-store');
+
   const search = (req.query.search || '').trim() || null;
   const genre = (req.query.genre || '').trim() || null;
   const type = (req.query.type || '').trim() || null;
@@ -1329,6 +1350,8 @@ router.get('/series', async (req, res) => {
 
 // GET /api/series/:id  -> serie con géneros, temporadas y episodios anidados
 router.get('/series/:id', async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'Id inválido' });
   try {
@@ -1879,30 +1902,31 @@ router.get('/episodes/:id/stream', async (req, res) => {
       return fresca ? guardarResolucion(id, preferredAudio, fresca) : null;
     };
 
-    let fuente = leerResolucion(id, preferredAudio);
-    if (!fuente) {
-      const ajustado = audioSeleccionado(collectAudioOptions(await cargarSnapshot()), requestedAudio);
-      if (ajustado !== preferredAudio) {
-        preferredAudio = ajustado;
-        fuente = leerResolucion(id, preferredAudio);
-      }
-    }
+    const audiosIntento = audiosAIntentar(collectAudioOptions(await cargarSnapshot()), requestedAudio);
+    let fuente = null;
 
-    if (!fuente) {
+    for (const audioCode of audiosIntento) {
+      preferredAudio = audioCode;
+      fuente = leerResolucion(id, preferredAudio);
+      if (fuente) break;
+
       const snap = await cargarSnapshot();
       const direct = await resolveDirectVideoCandidate(snap, episode, preferredAudio);
       const refreshed = direct ? null : await refreshVideoSourceFromSnapshot(snap, preferredAudio);
       const verificada = direct || refreshed;
 
       fuente = verificada || collectDirectVideoCandidates(snap, episode, preferredAudio)[0] || null;
-      if (!fuente) {
-        return res.status(404).json({ error: 'No se encontró una fuente de video reproducible' });
-      }
+      if (!fuente) continue;
 
       // Solo se guarda lo que se ha comprobado contra el origen: ese último
       // candidato es un intento a ciegas y no trae ni provider ni content-type,
       // que es lo que /playback necesita para elegir reproductor.
       if (verificada) guardarResolucion(id, preferredAudio, verificada);
+      break;
+    }
+
+    if (!fuente) {
+      return res.status(404).json({ error: 'No se encontró una fuente de video reproducible' });
     }
 
     return await transmitir(req, res, {

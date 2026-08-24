@@ -2,6 +2,7 @@ const express = require('express');
 const { sql, getPool } = require('../db');
 const { authRequired } = require('../middleware/auth');
 const { avisarSolicitud } = require('../lib/telegram');
+const { findExistingContent } = require('../lib/content-identity');
 
 const router = express.Router();
 router.use(authRequired); // pedir contenido exige sesión: así se sabe de quién viene
@@ -42,6 +43,14 @@ router.post('/', async (req, res) => {
 
   try {
     const pool = await getPool();
+
+    const existente = await findExistingContent(pool, { title, contentType });
+    if (existente) {
+      return res.status(409).json({
+        error: `«${existente.Title}» ya está disponible en el catálogo`,
+        seriesId: existente.Id
+      });
+    }
 
     const abiertas = await pool.request()
       .input('userId', sql.Int, req.user.id)

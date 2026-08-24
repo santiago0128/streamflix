@@ -39,6 +39,9 @@ Crear el esquema:
 docker compose -f docker-compose.prod.yml exec app node server/db/init.js
 ```
 
+Este paso también crea `Series.CanonicalRef` y `SeriesAliases`, usados para no
+duplicar una obra cuando se solicita con un título en otro idioma.
+
 Comprobar:
 
 ```bash

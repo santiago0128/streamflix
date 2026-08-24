@@ -4,8 +4,9 @@ name: Actualizar portadas del catálogo
 #
 # Lo diario nació de que una portada rota no avisa: nadie mira el catálogo
 # entero, y el aviso llega cuando alguien abre una ficha y se encuentra el hueco.
-# La pasada diaria usa --revisar, que pide cada imagen y rehace solo las que no
-# responden, así que en un día normal no cambia nada y apenas cuesta.
+# La pasada diaria usa --revisar: comprueba que cada imagen responda y que siga
+# perteneciendo a la ficha correcta. Una portada equivocada de TMDB también da
+# HTTP 200, por eso revisar solo disponibilidad no bastaba.
 #
 # Escribe en la base de producción, pero lo hace con red: no toca lo que ya
 # funciona, comprueba la imagen nueva antes de guardarla, salta las fichas cuyo
@@ -19,7 +20,7 @@ on:
         type: boolean
         default: false
       revisar:
-        description: 'Comprobar también las portadas que ya parecían buenas'
+        description: 'Comprobar disponibilidad e identidad de todas las portadas'
         type: boolean
         default: true
       tipos:

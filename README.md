@@ -87,10 +87,10 @@ npm run db:posters -- --revisar       # además, busca portadas que den 404
 npm run db:posters -- --apply --respaldo=vuelta.sql   # deja cómo deshacerlo
 ```
 
-`--revisar` pide cada portada que ya estaba en un CDN bueno y rehace las que no
-respondan. Sin él la decisión es solo por el dominio de la URL, que es rápido
-pero solo dice de dónde viene la imagen, no si sigue ahí: una portada de TMDB
-que muera no se rehace nunca. Es lo que conviene en una tarea periódica.
+`--revisar` pide cada portada que ya estaba en un CDN bueno y comprueba dos
+cosas: que responda y que la ficha de TMDB/AniList siga correspondiendo al
+título, tipo y año guardados. Sin él la decisión es solo por el dominio de la
+URL, que no detecta una portada viva pero perteneciente a otra película.
 
 La comprobación **reintenta antes de dar una imagen por muerta**. Pedir el
 catálogo entero de una tirada hace que el CDN corte la conexión, y con un solo
@@ -165,6 +165,12 @@ base — el importador vive en otro repositorio y no escribe aquí:
 SET QUOTED_IDENTIFIER ON;   -- obligatorio: la tabla tiene un índice filtrado
 UPDATE dbo.ContentRequests SET Status = 'listo' WHERE Id = 12;
 ```
+
+Antes de encolar, la web compara el título con el catálogo y sus alias oficiales
+(inglés, romaji y japonés en anime; TMDB en cine/series cuando hay clave). El
+worker repite la comprobación y usa la IA solo como respaldo para proponer
+traducciones: nunca bloquea por simple parecido. Así «Solo Leveling» y
+«俺だけレベルアップな件» se consideran la misma obra.
 
 ## Donaciones
 
@@ -352,6 +358,19 @@ Cada episodio guarda en la BD los segundos donde empieza y termina la intro
 sólo dentro de esa ventana; al pulsarlo salta a `IntroEndSec`. `OutroStartSec`
 dispara el botón **Siguiente episodio**. Para ajustar estas marcas basta con
 actualizar la fila del episodio en la tabla `Episodes`.
+
+El importador consulta las marcas exactas por episodio en AniSkip usando el ID
+de MyAnimeList resuelto por AniList. Esto se aplica tanto a JKAnime como a
+AnimeJara/HenaoJara. Para lo ya importado, desde el repositorio del bot:
+
+```bash
+npm run db:skip-times                         # simulación
+npm run db:skip-times -- --ids=1004 --apply # una ficha concreta
+npm run db:skip-times -- --apply             # todo lo que tenga datos
+```
+
+Si AniSkip no conoce un episodio se deja sin marca; una IA de texto no puede
+verificar un segundo de vídeo y no se usa para inventarlo.
 
 ## Próximos pasos sugeridos
 - Panel de administración para cargar series/episodios (hoy se cargan por SQL)
