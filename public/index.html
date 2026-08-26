@@ -27,6 +27,7 @@
         <a href="#" data-view="home" class="active">Inicio</a>
         <a href="#" data-type="anime">Animes</a>
         <a href="#" data-type="series">Series</a>
+        <a href="#" data-view="calendar">Calendario</a>
         <a href="#" data-type="movie">Películas</a>
         <a href="#" data-view="mylist" data-auth-only>Mi Lista</a>
         <!-- Sin data-auth-only: si se esconde al visitante, nadie descubre que
@@ -101,6 +102,37 @@
   <main class="content">
     <!-- Inicio: un carrusel por tipo, con lo último de cada uno. -->
     <div id="sections"></div>
+
+    <!-- Agenda pública: fechas anunciadas por AniList/TMDB y contenidos que el
+         vigilante está siguiendo aunque todavía no tengan día confirmado. -->
+    <section class="calendar-view" id="calendarView" aria-labelledby="calendarTitle" hidden>
+      <header class="calendar-head">
+        <div>
+          <span class="calendar-eyebrow">Próximos episodios</span>
+          <h2 id="calendarTitle">Calendario de estrenos</h2>
+          <p>
+            La hora corresponde a la emisión anunciada. El episodio aparece en
+            Noxis después, tan pronto como la fuente lo publique.
+          </p>
+        </div>
+        <div class="calendar-legend" aria-label="Leyenda">
+          <span><i class="calendar-dot anime"></i>Anime</span>
+          <span><i class="calendar-dot series"></i>Serie</span>
+        </div>
+      </header>
+      <p class="calendar-summary" id="calendarSummary"></p>
+      <div class="calendar-grid" id="calendarGrid"></div>
+      <section class="calendar-secondary" id="calendarLater" hidden>
+        <h3>Más adelante</h3>
+        <div class="calendar-pending-grid" id="calendarLaterGrid"></div>
+      </section>
+      <section class="calendar-secondary" id="calendarPending" hidden>
+        <h3>Próximos capítulos sin fecha confirmada</h3>
+        <p>Estos títulos están en seguimiento y se subirán cuando la fuente publique el siguiente episodio.</p>
+        <div class="calendar-pending-grid" id="calendarPendingGrid"></div>
+      </section>
+      <p class="calendar-empty" id="calendarEmpty" hidden>No hay próximos episodios registrados.</p>
+    </section>
 
     <!-- Listado completo: el "Ver más" de cada carrusel, la búsqueda y Mi Lista
          terminan aquí, con sus filtros y la paginación. -->

@@ -15,6 +15,7 @@ app.use(express.json());
 // API
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api', require('./routes/series'));
+app.use('/api/calendar', require('./routes/calendar'));
 app.use('/api/watchlist', require('./routes/watchlist'));
 app.use('/api/progress', require('./routes/progress'));
 app.use('/api/requests', require('./routes/requests'));

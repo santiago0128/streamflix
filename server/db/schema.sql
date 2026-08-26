@@ -82,6 +82,54 @@ IF COL_LENGTH('dbo.Series', 'ContentType') IS NULL
     ALTER TABLE dbo.Series ADD ContentType NVARCHAR(20) NOT NULL
         CONSTRAINT DF_Series_ContentType DEFAULT 'series' WITH VALUES;
 
+-- Calendario de capítulos. Los vigilantes del importador actualizan estas dos
+-- tablas; la aplicación solo las lee para enseñar el próximo estreno y el
+-- estado de emisión. Se declaran también aquí para que una instalación nueva
+-- no dependa de haber ejecutado primero los procesos en segundo plano.
+IF OBJECT_ID('dbo.AnimeEmision', 'U') IS NULL
+CREATE TABLE dbo.AnimeEmision (
+    Id                INT IDENTITY(1,1) PRIMARY KEY,
+    SeriesId          INT NOT NULL,
+    AniListId         INT NULL,
+    TituloAniList     NVARCHAR(300) NULL,
+    Estado            NVARCHAR(30) NULL,
+    DiaSemana         TINYINT NULL,
+    HoraUtc           NVARCHAR(5) NULL,
+    ProximoEpisodio   INT NULL,
+    ProximoEnUtc      DATETIME2 NULL,
+    UltimoImportado   INT NULL,
+    Intentos          INT NOT NULL CONSTRAINT DF_AnimeEmision_Intentos DEFAULT 0,
+    UltimaRevision    DATETIME2 NULL,
+    UltimoResultado   NVARCHAR(400) NULL,
+    Activo            BIT NOT NULL CONSTRAINT DF_AnimeEmision_Activo DEFAULT 1,
+    CreadoEn          DATETIME2 NOT NULL CONSTRAINT DF_AnimeEmision_CreadoEn DEFAULT SYSUTCDATETIME(),
+    SlugOrigen        NVARCHAR(200) NULL,
+    SeasonNumber      INT NULL,
+    CONSTRAINT FK_AnimeEmision_Series FOREIGN KEY (SeriesId) REFERENCES dbo.Series(Id),
+    CONSTRAINT UQ_AnimeEmision_Series UNIQUE (SeriesId)
+);
+
+IF OBJECT_ID('dbo.SerieEmision', 'U') IS NULL
+CREATE TABLE dbo.SerieEmision (
+    Id                INT IDENTITY(1,1) PRIMARY KEY,
+    SeriesId          INT NOT NULL,
+    Titulo            NVARCHAR(300) NULL,
+    Temporada         INT NULL,
+    UltimoImportado   INT NULL,
+    Intentos          INT NOT NULL CONSTRAINT DF_SerieEmision_Intentos DEFAULT 0,
+    UltimaRevision    DATETIME2 NULL,
+    UltimoResultado   NVARCHAR(400) NULL,
+    Activo            BIT NOT NULL CONSTRAINT DF_SerieEmision_Activo DEFAULT 1,
+    CreadoEn          DATETIME2 NOT NULL CONSTRAINT DF_SerieEmision_CreadoEn DEFAULT SYSUTCDATETIME(),
+    TmdbId            INT NULL,
+    Estado            NVARCHAR(40) NULL,
+    ProximoEpisodio   INT NULL,
+    ProximoEnUtc      DATETIME2 NULL,
+    UltimaEmisionUtc  DATETIME2 NULL,
+    CONSTRAINT FK_SerieEmision_Series FOREIGN KEY (SeriesId) REFERENCES dbo.Series(Id),
+    CONSTRAINT UQ_SerieEmision_Series UNIQUE (SeriesId)
+);
+
 -- Relación N:N Series <-> Géneros
 IF OBJECT_ID('dbo.SeriesGenres', 'U') IS NULL
 CREATE TABLE dbo.SeriesGenres (

@@ -11,6 +11,8 @@
     continueWatching: [],
     heroSlides: [],
     heroIndex: 0,
+    calendarItems: [],
+    calendarTimeZone: 'America/Bogota',
   };
 
   const CAROUSEL_SIZE = 10;
@@ -18,6 +20,7 @@
   const PAGE_SIZE = 24;
   const HERO_ROTATE_MS = 4000;
   const CAROUSEL_AUTOPLAY_MS = 4000;
+  const CALENDAR_DAYS = 14;
   const AUDIO_PREF_KEY = 'streamflix_player_audio_preference';
   const DETAIL_EPISODES_PAGE_SIZE = 30;
 
@@ -45,6 +48,19 @@
 
   function getContentTypeMeta(type) {
     return contentTypeMeta[type] || contentTypeMeta.default;
+  }
+
+  const releaseStatusMeta = {
+    airing: { label: 'En emisión', className: 'is-airing' },
+    finished: { label: 'Finalizado', className: 'is-finished' },
+    upcoming: { label: 'Próximamente', className: 'is-upcoming' },
+    unknown: { label: 'Por confirmar', className: 'is-unknown' },
+  };
+
+  function releaseStatusBadge(series) {
+    if (series.ContentType !== 'anime') return '';
+    const meta = releaseStatusMeta[series.ReleaseStatus] || releaseStatusMeta.unknown;
+    return `<span class="card-release-status ${meta.className}"><i></i>${meta.label}</span>`;
   }
 
   function getSectionTitle() {
@@ -242,14 +258,23 @@
   const heroMetaEl = $('heroMeta');
   const heroDescEl = $('heroDesc');
   const heroDotsEl = $('heroDots');
+  const calendarViewEl = $('calendarView');
+  const calendarGridEl = $('calendarGrid');
+  const calendarPendingEl = $('calendarPending');
+  const calendarPendingGridEl = $('calendarPendingGrid');
+  const calendarLaterEl = $('calendarLater');
+  const calendarLaterGridEl = $('calendarLaterGrid');
+  const calendarEmptyEl = $('calendarEmpty');
 
   const SECTION_ORDER = ['anime', 'series', 'movie'];
 
   function loadCatalog() {
+    if (state.view === 'calendar') return loadCalendar();
     return state.view === 'home' ? loadHome() : loadListing();
   }
 
   async function loadHome() {
+    calendarViewEl.hidden = true;
     sectionsEl.hidden = false;
     browseEl.hidden = true;
     paginationEl.hidden = true;
@@ -275,6 +300,7 @@
   }
 
   async function loadListing() {
+    calendarViewEl.hidden = true;
     sectionsEl.hidden = true;
     browseEl.hidden = false;
     clearCarousels();
@@ -294,6 +320,159 @@
       renderCards([]);
       renderPagination(0, 1);
       renderBrowseHead(0);
+    }
+  }
+
+  function dateKeyInTimeZone(date, timeZone) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+  }
+
+  function calendarDateKey(item, timeZone) {
+    if (!item.nextAt) return null;
+    if (item.datePrecision === 'date') return String(item.nextAt).slice(0, 10);
+    return dateKeyInTimeZone(new Date(item.nextAt), timeZone);
+  }
+
+  function calendarEpisodeLabel(item) {
+    const episode = item.nextEpisode != null ? `E${item.nextEpisode}` : 'Próximo episodio';
+    return item.seasonNumber != null ? `T${item.seasonNumber} · ${episode}` : episode;
+  }
+
+  function calendarTimeLabel(item, timeZone) {
+    if (!item.nextAt) return 'Fecha por confirmar';
+    if (item.datePrecision === 'date') return 'Durante el día';
+    return new Intl.DateTimeFormat('es-CO', {
+      timeZone,
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(item.nextAt));
+  }
+
+  function calendarLongDate(item, timeZone) {
+    if (!item.nextAt) return 'Fecha por confirmar';
+    const options = {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      timeZone: item.datePrecision === 'date' ? 'UTC' : timeZone,
+    };
+    return new Intl.DateTimeFormat('es-CO', options).format(new Date(item.nextAt));
+  }
+
+  function calendarSeed(item) {
+    return {
+      Id: item.seriesId,
+      Title: item.title,
+      PosterUrl: item.posterUrl,
+      BackdropUrl: item.backdropUrl,
+      ContentType: item.contentType,
+      ReleaseStatus: item.releaseStatus,
+    };
+  }
+
+  function buildCalendarEvent(item, { pending = false, later = false } = {}) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = pending || later ? 'calendar-pending-card' : `calendar-event ${item.contentType}`;
+
+    const statusMeta = releaseStatusMeta[item.releaseStatus] || releaseStatusMeta.unknown;
+    const schedule = pending
+      ? (item.nextAt ? 'Esperando publicación' : 'Fecha por confirmar')
+      : (later ? calendarLongDate(item, state.calendarTimeZone) : calendarTimeLabel(item, state.calendarTimeZone));
+
+    button.innerHTML = `
+      <img src="${poster(item.posterUrl)}" alt="" loading="lazy" />
+      <span class="calendar-event-copy">
+        <strong>${item.title}</strong>
+        <span>${calendarEpisodeLabel(item)}</span>
+        <span class="calendar-event-time">${schedule}</span>
+      </span>
+      <span class="calendar-event-status ${statusMeta.className}"><i></i>${statusMeta.label}</span>`;
+    button.addEventListener('click', () => openDetail(item.seriesId, calendarSeed(item)));
+    return button;
+  }
+
+  function renderCalendar(items, timeZone) {
+    state.calendarItems = items;
+    state.calendarTimeZone = timeZone || 'America/Bogota';
+    calendarGridEl.innerHTML = '';
+    calendarPendingGridEl.innerHTML = '';
+    calendarLaterGridEl.innerHTML = '';
+
+    const today = new Date();
+    const days = Array.from({ length: CALENDAR_DAYS }, (_, index) => {
+      const date = new Date(today.getTime() + index * 86400000);
+      return { date, key: dateKeyInTimeZone(date, state.calendarTimeZone), items: [] };
+    });
+    const dayByKey = new Map(days.map((day) => [day.key, day]));
+    const firstKey = days[0].key;
+    const lastKey = days[days.length - 1].key;
+    const pending = [];
+    const later = [];
+
+    items.forEach((item) => {
+      const key = calendarDateKey(item, state.calendarTimeZone);
+      if (!key || key < firstKey) pending.push(item);
+      else if (key > lastKey) later.push(item);
+      else dayByKey.get(key)?.items.push(item);
+    });
+
+    days.forEach((day, index) => {
+      const article = document.createElement('article');
+      article.className = 'calendar-day' + (index === 0 ? ' is-today' : '');
+      const title = new Intl.DateTimeFormat('es-CO', {
+        timeZone: state.calendarTimeZone,
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+      }).format(day.date).replace('.', '');
+      article.innerHTML = `
+        <header><span>${index === 0 ? 'Hoy' : title.split(' ')[0]}</span><strong>${index === 0 ? title : title.split(' ').slice(1).join(' ')}</strong></header>
+        <div class="calendar-day-events"></div>`;
+      const events = article.querySelector('.calendar-day-events');
+      day.items
+        .sort((a, b) => new Date(a.nextAt) - new Date(b.nextAt))
+        .forEach((item) => events.appendChild(buildCalendarEvent(item)));
+      if (!day.items.length) events.innerHTML = '<span class="calendar-day-empty">Sin estrenos</span>';
+      calendarGridEl.appendChild(article);
+    });
+
+    later.sort((a, b) => new Date(a.nextAt) - new Date(b.nextAt))
+      .forEach((item) => calendarLaterGridEl.appendChild(buildCalendarEvent(item, { later: true })));
+    pending.forEach((item) => calendarPendingGridEl.appendChild(buildCalendarEvent(item, { pending: true })));
+
+    calendarLaterEl.hidden = later.length === 0;
+    calendarPendingEl.hidden = pending.length === 0;
+    calendarEmptyEl.hidden = items.length > 0;
+    $('calendarSummary').textContent = items.length === 1
+      ? '1 título en seguimiento'
+      : `${items.length} títulos en seguimiento`;
+  }
+
+  async function loadCalendar() {
+    sectionsEl.hidden = true;
+    browseEl.hidden = true;
+    paginationEl.hidden = true;
+    emptyState.hidden = true;
+    clearCarousels();
+    stopHeroRotation();
+    heroEl.hidden = true;
+    calendarViewEl.hidden = false;
+    calendarGridEl.innerHTML = '<div class="calendar-loading">Preparando el calendario…</div>';
+
+    try {
+      const data = await API.calendar();
+      renderCalendar(Array.isArray(data.items) ? data.items : [], data.timeZone);
+    } catch (error) {
+      toast(error.message);
+      renderCalendar([], 'America/Bogota');
     }
   }
 
@@ -331,7 +510,10 @@
     card.innerHTML = `
       <span class="card-type">${typeMeta.label}</span>
       ${series.Rating != null ? `<span class="card-rating">★ ${Number(series.Rating).toFixed(1)}</span>` : ''}
-      <img class="card-poster" src="${poster(series.PosterUrl)}" alt="${series.Title}" loading="lazy" />
+      <div class="card-poster-wrap">
+        <img class="card-poster" src="${poster(series.PosterUrl)}" alt="${series.Title}" loading="lazy" />
+        ${releaseStatusBadge(series)}
+      </div>
       <div class="card-body">
         <div class="card-title">${series.Title}</div>
         <div class="card-genres">${series.Genres || ''}</div>
@@ -719,6 +901,7 @@
     state[field] = value || '';
     state.page = 1;
     if (state.view === 'home') state.view = 'browse';
+    else if (state.view === 'calendar') state.view = 'browse';
     else if (state.view === 'browse' && !state.search && !state.genre && !state.contentType) state.view = 'home';
     render();
   }
@@ -728,7 +911,8 @@
       const isType = link.dataset.type && state.view === 'browse' && link.dataset.type === state.contentType;
       const isHome = link.dataset.view === 'home' && state.view === 'home';
       const isList = link.dataset.view === 'mylist' && state.view === 'mylist';
-      link.classList.toggle('active', Boolean(isType || isHome || isList));
+      const isCalendar = link.dataset.view === 'calendar' && state.view === 'calendar';
+      link.classList.toggle('active', Boolean(isType || isHome || isList || isCalendar));
     });
   }
 

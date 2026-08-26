@@ -32,6 +32,7 @@ const API = (() => {
     getToken, getUser, setSession, clearSession,
     genres: () => req('/genres'),
     contentTypes: () => req('/content-types'),
+    calendar: () => req('/calendar'),
     // Sin `page` responde un array con todo; con `page`, un objeto
     // { items, total, page, pageSize, totalPages }.
     series: ({ search, genre, type, page, pageSize } = {}) => {

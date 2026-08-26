@@ -3,6 +3,7 @@ const https = require('https');
 const crypto = require('crypto');
 const express = require('express');
 const { sql, getPool } = require('../db');
+const { releaseStatusSql } = require('../lib/release-status');
 
 const router = express.Router();
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
@@ -1276,7 +1277,7 @@ const DEFAULT_PAGE_SIZE = 24;
 
 const SERIES_COLUMNS = `
   s.Id, s.Title, s.Description, s.PosterUrl, s.BackdropUrl, s.ReleaseYear, s.Rating,
-  s.ContentType,
+  s.ContentType, ${releaseStatusSql('s')} AS ReleaseStatus,
   (SELECT STRING_AGG(g.Name, ', ')
      FROM dbo.SeriesGenres sg JOIN dbo.Genres g ON g.Id = sg.GenreId
     WHERE sg.SeriesId = s.Id) AS Genres`;
@@ -1358,7 +1359,7 @@ router.get('/series/:id', async (req, res) => {
     const pool = await getPool();
 
     const seriesRes = await pool.request().input('id', sql.Int, id)
-      .query('SELECT * FROM dbo.Series WHERE Id = @id');
+      .query(`SELECT s.*, ${releaseStatusSql('s')} AS ReleaseStatus FROM dbo.Series s WHERE s.Id = @id`);
     const series = seriesRes.recordset[0];
     if (!series) return res.status(404).json({ error: 'Serie no encontrada' });
 

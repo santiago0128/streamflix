@@ -1,6 +1,7 @@
 const express = require('express');
 const { sql, getPool } = require('../db');
 const { authRequired } = require('../middleware/auth');
+const { releaseStatusSql } = require('../lib/release-status');
 
 const router = express.Router();
 router.use(authRequired); // todo lo de aquí requiere sesión
@@ -11,7 +12,7 @@ router.get('/', async (req, res) => {
     const pool = await getPool();
     const result = await pool.request().input('userId', sql.Int, req.user.id)
       .query(`SELECT s.Id, s.Title, s.PosterUrl, s.BackdropUrl, s.ReleaseYear, s.Rating,
-                     s.ContentType,
+                     s.ContentType, ${releaseStatusSql('s')} AS ReleaseStatus,
                      (SELECT STRING_AGG(g.Name, ', ')
                         FROM dbo.SeriesGenres sg JOIN dbo.Genres g ON g.Id = sg.GenreId
                        WHERE sg.SeriesId = s.Id) AS Genres,
