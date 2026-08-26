@@ -2,29 +2,22 @@
 
 const express = require('express');
 const { getPool } = require('../db');
+const { releaseStatusFromTracker } = require('../lib/release-status');
 
 const router = express.Router();
 
-function normalizeReleaseStatus(contentType, trackerStatus, active) {
-  const status = String(trackerStatus || '').toUpperCase();
-
-  if (!active || status === 'FINISHED' || status === 'ENDED' || status === 'CANCELED') {
-    return 'finished';
-  }
-  if (status === 'NOT_YET_RELEASED' || status === 'IN PRODUCTION' || status === 'PLANNED') {
-    return 'upcoming';
-  }
-  if (contentType === 'anime' && (status === 'RELEASING' || status === 'JK_ONLY')) {
-    return 'airing';
-  }
-
-  // Una fila activa existe precisamente porque el vigilante está esperando el
-  // siguiente capítulo. Para series sin TMDB el estado textual viene vacío,
-  // pero sigue siendo correcto enseñarlas como contenido en seguimiento.
-  return active ? 'airing' : 'unknown';
-}
-
-// GET /api/calendar -> próximos capítulos de anime y series convencionales.
+// GET /api/calendar -> próximos capítulos de anime.
+//
+// Sólo anime, a propósito. Las series convencionales se siguen vigilando en
+// dbo.SerieEmision, pero su estado real sale de TMDB y sin `TMDB_API_KEY` esas
+// filas se quedan con `Estado` a NULL: el vigilante nunca se entera de que la
+// temporada acabó, sondea a ciegas para siempre y la fila no se apaga nunca.
+// Publicarlas aquí convertía "la seguimos mirando" en "En emisión", que es como
+// Loki —terminada en 2023— aparecía estrenando capítulo. El anime no tiene ese
+// problema: AniList no pide clave y da el estado y la fecha del siguiente.
+//
+// Para devolverlas al calendario hace falta la clave de TMDB en el entorno del
+// vigilante; con ella `SerieEmision.Estado` se llena y vuelve a ser publicable.
 router.get('/', async (_req, res) => {
   res.setHeader('cache-control', 'no-store');
 
@@ -41,31 +34,14 @@ router.get('/', async (_req, res) => {
         a.Estado AS TrackerStatus,
         a.UltimoImportado AS LastImported,
         a.UltimaRevision AS LastCheckedAt,
-        a.Activo AS IsActive,
-        CAST('datetime' AS NVARCHAR(12)) AS DatePrecision
+        a.Activo AS IsActive
       FROM dbo.AnimeEmision a
       JOIN dbo.Series s ON s.Id = a.SeriesId
       WHERE a.Activo = 1
-
-      UNION ALL
-
-      SELECT
-        v.SeriesId, s.Title, s.ContentType, s.PosterUrl, s.BackdropUrl,
-        v.Temporada AS SeasonNumber,
-        COALESCE(v.ProximoEpisodio, v.UltimoImportado + 1) AS NextEpisode,
-        v.ProximoEnUtc AS NextAt,
-        CAST(NULL AS TINYINT) AS Weekday,
-        CAST(NULL AS NVARCHAR(5)) AS TimeUtc,
-        v.Estado AS TrackerStatus,
-        v.UltimoImportado AS LastImported,
-        v.UltimaRevision AS LastCheckedAt,
-        v.Activo AS IsActive,
-        CAST('date' AS NVARCHAR(12)) AS DatePrecision
-      FROM dbo.SerieEmision v
-      JOIN dbo.Series s ON s.Id = v.SeriesId
-      WHERE v.Activo = 1
-
-      ORDER BY NextAt, Title;
+        -- Una fila viva pero ya terminada es la que el vigilante todavía no ha
+        -- apagado. No es un estreno pendiente y no se anuncia como tal.
+        AND UPPER(LTRIM(RTRIM(ISNULL(a.Estado, '')))) NOT IN ('FINISHED', 'CANCELLED', 'CANCELED')
+      ORDER BY a.ProximoEnUtc, s.Title;
     `);
 
     const items = result.recordset.map((row) => ({
@@ -81,8 +57,9 @@ router.get('/', async (_req, res) => {
       timeUtc: row.TimeUtc,
       lastImported: row.LastImported,
       lastCheckedAt: row.LastCheckedAt,
-      datePrecision: row.DatePrecision,
-      releaseStatus: normalizeReleaseStatus(row.ContentType, row.TrackerStatus, Boolean(row.IsActive)),
+      // AniList da hora exacta de estreno, no sólo el día.
+      datePrecision: 'datetime',
+      releaseStatus: releaseStatusFromTracker(row.TrackerStatus, Boolean(row.IsActive)),
       scheduleStatus: row.NextAt ? 'confirmed' : (row.Weekday != null && row.TimeUtc ? 'recurring' : 'pending')
     }));
 

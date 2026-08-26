@@ -201,6 +201,36 @@ el token de prueba (`TEST-...`) devuelve un enlace de sandbox.
 **Sin ninguna de las dos, el botón no aparece**: la web pregunta primero a
 `/api/donations/config`, para no enseñar un botón que lleva a un error.
 
+## Calendario de estrenos
+
+`GET /api/calendar` alimenta la vista **Calendario** con los próximos capítulos.
+**Sólo anime**, a propósito.
+
+El estado sale de `dbo.AnimeEmision`, que el vigilante refresca contra AniList
+—no pide clave, así que el dato está siempre disponible—. Las series
+convencionales se siguen vigilando en `dbo.SerieEmision`, pero su estado real
+viene de TMDB: sin `TMDB_API_KEY` en el entorno del vigilante esas filas se
+quedan con `Estado` a NULL, nadie se entera de que la temporada acabó, el
+vigilante sondea a ciegas para siempre y la fila no se apaga nunca. Publicarlas
+convertía «la seguimos mirando» en «En emisión», y así *Loki* —terminada en
+2023— aparecía estrenando capítulo. Para devolverlas al calendario basta con
+poner la clave de TMDB; entonces `SerieEmision.Estado` se llena y vuelve a ser
+publicable.
+
+La lección general: **`Activo` no significa «está en emisión»**, significa «el
+vigilante todavía la mira». Sólo `Estado` puede afirmar lo primero.
+
+Las reglas viven en un solo sitio, [server/lib/release-status.js](server/lib/release-status.js),
+que produce las dos salidas que hacen falta: una expresión SQL para incrustar en
+las consultas del catálogo (`releaseStatusSql`) y una función JS para filas ya
+leídas (`releaseStatusFromTracker`). Antes cada vista tenía su copia de las
+reglas y discrepaban justo en ese caso.
+
+Que una ficha *aparezca* depende de que tenga fila en `AnimeEmision`, y esa fila
+sólo la creaba el registro manual. Para que el catálogo entero tenga estado real
+—y para que un anime en emisión no quede invisible— se sincroniza desde el
+repositorio del bot con `npm run db:estado-anime`.
+
 ## Verificar el contenido
 
 `npm run db:verify` comprueba que lo guardado es de verdad la serie que se quiso
