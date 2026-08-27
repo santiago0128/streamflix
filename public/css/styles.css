@@ -391,13 +391,37 @@ button { font-family: inherit; cursor: pointer; }
 .ctrl:disabled:hover { opacity: .3; transform: none; }
 .ctrl-spacer { flex: 1; }
 .time { font-size: 13px; color: #ddd; font-variant-numeric: tabular-nums; }
+/* Este es el único .ctrl que no es un icono suelto sino una pastilla con
+   etiqueta, así que hay que deshacer tres cosas que .ctrl da por supuestas. */
 .next-episode-control {
   display: inline-flex; align-items: center; gap: 7px; width: auto;
   padding: 7px 12px; border-radius: 999px; background: rgba(139, 92, 246, .24);
   border: 1px solid rgba(184, 130, 255, .38); color: #fff; font-size: 13px;
+  /* La pastilla es más alta que los iconos de al lado por su padding y su
+     borde; sin esto se apoya en la línea base y queda un pelo descolgada
+     respecto a ▶ y ⏮. */
+  line-height: 1.1; vertical-align: middle;
 }
-.next-episode-control:hover:not(:disabled) { background: rgba(139, 92, 246, .42); }
-.next-episode-control:disabled { opacity: .35; cursor: default; }
+
+/* .ctrl agranda un 12% al pasar por encima, que funciona en un icono de 20 px
+   y no en una pastilla de ~150: el botón daba un salto, se comía el hueco de
+   16 px de la fila y empujaba visualmente al reloj. Aquí el realce ya lo da el
+   fondo, así que se cambia la escala por un aclarado del borde. */
+.next-episode-control:hover { transform: none; }
+.next-episode-control:hover:not(:disabled) {
+  background: rgba(139, 92, 246, .42);
+  border-color: rgba(184, 130, 255, .6);
+}
+
+/* El glifo heredaba el font-size de la pastilla (13 px) y quedaba más pequeño
+   que los ⏮ ▶ de al lado, que van a 20. Se le devuelve tamaño de icono sin
+   tocar el de la etiqueta. */
+.next-episode-control > [aria-hidden] { font-size: 17px; line-height: 1; }
+
+/* .ctrl:disabled ya deja opacity .3 y .ctrl:disabled:hover la repite; tener
+   aquí .35 hacía que la pastilla apagada cambiara de tono al pasar el ratón
+   por encima. Un botón muerto no debe reaccionar a nada. */
+.next-episode-control:disabled { opacity: .3; cursor: default; }
 .audio-quick-select { background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.22);
   border-radius: 999px; padding: 7px 12px; font-size: 13px; min-width: 120px; }
 .audio-quick-select.is-fallback {
