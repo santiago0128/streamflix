@@ -38,7 +38,21 @@
     toastTimer = setTimeout(() => (toastEl.hidden = true), 2600);
   }
 
-  const poster = (url) => url || 'https://via.placeholder.com/320x460/26163d/c1acef?text=Noxis';
+  // El hueco se dibuja aquí mismo, no se pide fuera. Antes salía de
+  // via.placeholder.com, que dejó de responder: cada ficha sin portada se veía
+  // como una imagen rota del navegador —el icono gris con el borde— y parecía
+  // que la web estaba caída, no que faltara una carátula. Un data URI no puede
+  // caerse ni tarda en cargar, y es lo mínimo que debe cumplir un respaldo.
+  const POSTER_VACIO = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 460">' +
+    '<rect width="320" height="460" fill="#26163d"/>' +
+    '<text x="160" y="222" fill="#c1acef" font-family="system-ui,sans-serif"' +
+    ' font-size="26" font-weight="600" text-anchor="middle">Noxis</text>' +
+    '<text x="160" y="256" fill="#8f7bb8" font-family="system-ui,sans-serif"' +
+    ' font-size="15" text-anchor="middle">sin portada</text></svg>'
+  );
+
+  const poster = (url) => url || POSTER_VACIO;
   const contentTypeMeta = {
     anime: { label: 'Anime', section: 'Animes', badge: 'Mundo anime' },
     series: { label: 'Serie', section: 'Series', badge: 'Maratón' },
