@@ -6,18 +6,17 @@ const { releaseStatusFromTracker } = require('../lib/release-status');
 
 const router = express.Router();
 
-// GET /api/calendar -> próximos capítulos de anime.
+// GET /api/calendar -> próximos capítulos de anime y de series convencionales.
 //
-// Sólo anime, a propósito. Las series convencionales se siguen vigilando en
-// dbo.SerieEmision, pero su estado real sale de TMDB y sin `TMDB_API_KEY` esas
-// filas se quedan con `Estado` a NULL: el vigilante nunca se entera de que la
-// temporada acabó, sondea a ciegas para siempre y la fila no se apaga nunca.
-// Publicarlas aquí convertía "la seguimos mirando" en "En emisión", que es como
-// Loki —terminada en 2023— aparecía estrenando capítulo. El anime no tiene ese
-// problema: AniList no pide clave y da el estado y la fecha del siguiente.
+// Las series estuvieron fuera un tiempo, y merece la pena recordar por qué: sin
+// `TMDB_API_KEY` sus filas se quedaban con `Estado` a NULL, el vigilante nunca
+// se enteraba de que la temporada había acabado y esta ruta traducía "la
+// seguimos mirando" a "En emisión". Así aparecía Loki —terminada en 2023—
+// estrenando capítulo cada semana.
 //
-// Para devolverlas al calendario hace falta la clave de TMDB en el entorno del
-// vigilante; con ella `SerieEmision.Estado` se llena y vuelve a ser publicable.
+// Con la clave puesta, TMDB dice el estado de verdad (Loki: "Ended") y vuelven
+// a ser publicables. La condición para enseñarlas no es tener fila, es que la
+// fila diga algo: se excluyen las terminadas y las canceladas.
 router.get('/', async (_req, res) => {
   res.setHeader('cache-control', 'no-store');
 
@@ -34,14 +33,40 @@ router.get('/', async (_req, res) => {
         a.Estado AS TrackerStatus,
         a.UltimoImportado AS LastImported,
         a.UltimaRevision AS LastCheckedAt,
-        a.Activo AS IsActive
+        a.Activo AS IsActive,
+        -- AniList da hora exacta de estreno, no sólo el día.
+        CAST('datetime' AS NVARCHAR(12)) AS DatePrecision
       FROM dbo.AnimeEmision a
       JOIN dbo.Series s ON s.Id = a.SeriesId
       WHERE a.Activo = 1
         -- Una fila viva pero ya terminada es la que el vigilante todavía no ha
         -- apagado. No es un estreno pendiente y no se anuncia como tal.
         AND UPPER(LTRIM(RTRIM(ISNULL(a.Estado, '')))) NOT IN ('FINISHED', 'CANCELLED', 'CANCELED')
-      ORDER BY a.ProximoEnUtc, s.Title;
+
+      UNION ALL
+
+      SELECT
+        v.SeriesId, s.Title, s.ContentType, s.PosterUrl, s.BackdropUrl,
+        v.Temporada AS SeasonNumber,
+        COALESCE(v.ProximoEpisodio, v.UltimoImportado + 1) AS NextEpisode,
+        v.ProximoEnUtc AS NextAt,
+        CAST(NULL AS TINYINT) AS Weekday,
+        CAST(NULL AS NVARCHAR(5)) AS TimeUtc,
+        v.Estado AS TrackerStatus,
+        v.UltimoImportado AS LastImported,
+        v.UltimaRevision AS LastCheckedAt,
+        v.Activo AS IsActive,
+        -- TMDB da el día de estreno, no la hora.
+        CAST('date' AS NVARCHAR(12)) AS DatePrecision
+      FROM dbo.SerieEmision v
+      JOIN dbo.Series s ON s.Id = v.SeriesId
+      WHERE v.Activo = 1
+        AND UPPER(LTRIM(RTRIM(ISNULL(v.Estado, '')))) NOT IN ('ENDED', 'CANCELED', 'CANCELLED')
+        -- Sin estado no se publica: es el caso en el que no sabemos nada, y
+        -- enseñarla sería volver a afirmar emisión por el mero seguimiento.
+        AND NULLIF(LTRIM(RTRIM(ISNULL(v.Estado, ''))), '') IS NOT NULL
+
+      ORDER BY NextAt, Title;
     `);
 
     const items = result.recordset.map((row) => ({
@@ -57,9 +82,10 @@ router.get('/', async (_req, res) => {
       timeUtc: row.TimeUtc,
       lastImported: row.LastImported,
       lastCheckedAt: row.LastCheckedAt,
-      // AniList da hora exacta de estreno, no sólo el día.
-      datePrecision: 'datetime',
-      releaseStatus: releaseStatusFromTracker(row.TrackerStatus, Boolean(row.IsActive)),
+      datePrecision: row.DatePrecision,
+      releaseStatus: releaseStatusFromTracker(
+        row.TrackerStatus, Boolean(row.IsActive), Boolean(row.NextAt)
+      ),
       scheduleStatus: row.NextAt ? 'confirmed' : (row.Weekday != null && row.TimeUtc ? 'recurring' : 'pending')
     }));
 

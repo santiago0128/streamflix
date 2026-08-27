@@ -15,7 +15,12 @@
  * activa. Por eso el estado sale de `Estado`, y `Activo` sólo puede rebajarlo.
  */
 
-// AniList: RELEASING, FINISHED, NOT_YET_RELEASED, CANCELLED, HIATUS.
+// Dos vocabularios, porque son dos fuentes: AniList para el anime (RELEASING,
+// FINISHED, NOT_YET_RELEASED, CANCELLED, HIATUS) y TMDB para las series
+// convencionales ("Returning Series", "Ended", "Canceled", "In Production",
+// "Planned", "Pilot"). Se normalizan a mayúsculas y se resuelven en la misma
+// tabla para que ninguna vista tenga que saber de dónde vino el dato.
+//
 // JK_ONLY es nuestro: AniList no la reconoce y alguien la registró a mano
 // contra JK Anime, así que la afirmación viene de una persona, no del código.
 const ESTADOS = {
@@ -26,17 +31,35 @@ const ESTADOS = {
   CANCELLED: 'finished',
   CANCELED: 'finished',
   // En pausa no es en emisión, pero tampoco terminada: no hay fecha que dar.
-  HIATUS: 'unknown'
+  HIATUS: 'unknown',
+
+  // --- TMDB ---
+  ENDED: 'finished',
+  'IN PRODUCTION': 'upcoming',
+  PLANNED: 'upcoming',
+  PILOT: 'unknown',
+  // "Returning Series" sólo dice que habrá más, no que se esté emitiendo hoy:
+  // Devil May Cry está así y su último capítulo salió en mayo. Tratarlo como
+  // "en emisión" repetiría el error que teníamos, sólo que con mejor dato, así
+  // que quien decide es la fecha del siguiente capítulo (ver `conFecha`).
+  'RETURNING SERIES': 'unknown'
 };
 
 /**
- * @param {string|null} estado  valor de AnimeEmision.Estado
- * @param {boolean} activo     AnimeEmision.Activo
+ * @param {string|null} estado  valor de AnimeEmision.Estado o SerieEmision.Estado
+ * @param {boolean} activo     la columna Activo de esa misma fila
+ * @param {boolean} conFecha   si hay un próximo capítulo con fecha anunciada
  * @returns {'airing'|'finished'|'upcoming'|'unknown'}
  */
-function releaseStatusFromTracker(estado, activo) {
+function releaseStatusFromTracker(estado, activo, conFecha = false) {
   const clave = String(estado || '').trim().toUpperCase();
   const mapeado = ESTADOS[clave];
+
+  // Una fecha de estreno confirmada es la prueba más fuerte de que algo está
+  // emitiéndose, y manda sobre la etiqueta: "Returning Series" con capítulo
+  // anunciado para el jueves está en emisión, sin él sólo está anunciada.
+  // Nunca contradice a una terminada: si TMDB dice Ended, no hay tal fecha.
+  if (conFecha && activo && mapeado !== 'finished' && mapeado !== 'upcoming') return 'airing';
 
   // Terminada es terminada aunque el vigilante siga apuntada la fila.
   if (mapeado === 'finished') return 'finished';
