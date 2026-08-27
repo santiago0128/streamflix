@@ -1,10 +1,16 @@
 /**
  * Búsqueda de fichas en themoviedb.org, compartida por los scripts de imágenes.
  *
- * No usa la API con clave a propósito: la portada y el banner son lo único que
- * se necesita y salen de la web pública, así que el script funciona en un
- * servidor recién montado sin registrar nada. TMDB_API_KEY sigue siendo cosa
- * del bot importador, que sí pide títulos y sinopsis.
+ * Con `TMDB_API_KEY` pregunta a la API; sin ella raspa la web pública, que es
+ * como nació y lo que permite estrenar un servidor sin registrar nada. Los dos
+ * caminos aplican los mismos filtros de identidad: cambia la fuente, no el
+ * rigor con el que se acepta una ficha.
+ *
+ * La API vale la pena cuando está disponible porque el buscador público no
+ * indexa los títulos de estreno latinoamericanos —"Sueño de fuga" y "Parásitos"
+ * devuelven "Sin resultados"— y el catálogo se importa de sitios que titulan
+ * justamente así. Además devuelve el título original junto al traducido y la
+ * ruta de la portada en la propia búsqueda, con lo que sobra abrir la ficha.
  *
  * Aquí vive solo la parte de "encontrar la ficha correcta". Qué imagen sacar de
  * ella es cosa de cada script: el banner y la portada están en etiquetas
@@ -82,7 +88,7 @@ function getTmdbSearchQueries(series) {
   return queries;
 }
 
-function get(url, redirects = 5) {
+function get(url, redirects = 5, cabeceras = {}) {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https:') ? https : http;
     const req = client.get(
@@ -90,7 +96,8 @@ function get(url, redirects = 5) {
       {
         headers: {
           'User-Agent': USER_AGENT,
-          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          ...cabeceras
         },
         timeout: 20000
       },
@@ -99,7 +106,7 @@ function get(url, redirects = 5) {
         const location = res.headers.location;
         if (status >= 300 && status < 400 && location && redirects > 0) {
           res.resume();
-          return resolve(get(new URL(location, url).toString(), redirects - 1));
+          return resolve(get(new URL(location, url).toString(), redirects - 1, cabeceras));
         }
         if (status >= 400) {
           res.resume();
@@ -157,11 +164,11 @@ function encolar(tarea) {
 // (429, 5xx, timeouts, cortes de red) es pasajero y sí merece otra oportunidad.
 const esPasajero = (error) => !error.status || error.status === 429 || error.status >= 500;
 
-async function requestText(url) {
+async function requestText(url, { headers = {} } = {}) {
   let ultimoError;
   for (let intento = 0; intento < 4; intento += 1) {
     try {
-      return await encolar(() => get(url));
+      return await encolar(() => get(url, 5, headers));
     } catch (error) {
       ultimoError = error;
       if (!esPasajero(error)) throw error;
@@ -227,7 +234,15 @@ function isCompatibleMediaType(candidate, series) {
 }
 
 function isStrongTitleMatch(candidate, series, titleVariants) {
-  const candidateTitle = normalizeSearchTitle(candidate.title);
+  // La API devuelve el título traducido y el original, y la ficha del catálogo
+  // puede venir por cualquiera de los dos: "Sueño de fuga" es el traducido de
+  // "The Shawshank Redemption". Al raspar sólo hay uno, así que `titles` cae
+  // en `title` y el comportamiento no cambia.
+  const candidateTitles = (candidate.titles && candidate.titles.length
+    ? candidate.titles
+    : [candidate.title]
+  ).map(normalizeSearchTitle).filter(Boolean);
+
   const variants = (titleVariants && titleVariants.length
     ? titleVariants
     : getTmdbSearchQueries(series).map(normalizeSearchTitle)
@@ -236,7 +251,7 @@ function isStrongTitleMatch(candidate, series, titleVariants) {
   // El tipo correcto no demuestra identidad. Antes daba 40 puntos, justo el
   // umbral de aceptación, de modo que el primer resultado "movie" podía ganar
   // aunque su título no tuviera una sola palabra en común con lo buscado.
-  if (!candidateTitle || !variants.includes(candidateTitle)) return false;
+  if (!candidateTitles.some((titulo) => variants.includes(titulo))) return false;
 
   if (series.ReleaseYear && candidate.year) {
     return Math.abs(series.ReleaseYear - candidate.year) <= 1;
@@ -271,6 +286,66 @@ function parseTmdbSearchResults(html) {
  * cual. Antes se tragaba, y un corte de red se leía en el informe como que la
  * película no está en TMDB, que es justo lo contrario de lo que pasaba.
  */
+const TMDB_API_URL = 'https://api.themoviedb.org/3';
+
+const hayClave = () => Boolean(String(process.env.TMDB_API_KEY || '').trim());
+
+/**
+ * La API acepta la clave v3 como parámetro y el token v4 (un JWT, empieza por
+ * "eyJ") como cabecera Bearer. Mandar el v4 en `api_key` responde "Invalid API
+ * key", que se lee como clave equivocada y no como formato equivocado.
+ */
+async function pedirApi(ruta, parametros = {}) {
+  const clave = String(process.env.TMDB_API_KEY || '').trim();
+  const esTokenV4 = clave.startsWith('eyJ');
+  const url = new URL(`${TMDB_API_URL}${ruta}`);
+  url.searchParams.set('language', 'es-MX');
+  for (const [k, v] of Object.entries(parametros)) if (v) url.searchParams.set(k, String(v));
+  if (!esTokenV4) url.searchParams.set('api_key', clave);
+
+  const texto = await requestText(url.toString(), {
+    headers: esTokenV4 ? { Authorization: `Bearer ${clave}` } : {}
+  });
+  return JSON.parse(texto);
+}
+
+/**
+ * Candidatos vía API. Es mejor que raspar la web por una razón concreta: el
+ * buscador público no encuentra los títulos de estreno latinoamericanos —
+ * "Sueño de fuga" y "Parásitos" devuelven "Sin resultados"— y el catálogo se
+ * importa de sitios que titulan justamente así. La API sí los indexa, y además
+ * devuelve el título original junto al traducido, que es lo que permite casar
+ * la ficha venga con el nombre que venga.
+ */
+async function buscarPorApi(series, consulta) {
+  const tipos = series.ContentType === 'series' ? ['tv'] : ['movie'];
+  // El anime puede estar catalogado como película o como serie.
+  if (series.ContentType === 'anime') tipos.push('tv');
+
+  const candidatos = [];
+  for (const tipo of tipos) {
+    const datos = await pedirApi(`/search/${tipo}`, {
+      query: consulta,
+      year: tipo === 'movie' ? series.ReleaseYear || undefined : undefined,
+      first_air_date_year: tipo === 'tv' ? series.ReleaseYear || undefined : undefined
+    });
+    for (const r of (datos.results || []).slice(0, 8)) {
+      const fecha = r.release_date || r.first_air_date || '';
+      candidatos.push({
+        mediaType: tipo,
+        path: `/${tipo}/${r.id}`,
+        title: r.title || r.name || '',
+        titles: [r.title, r.name, r.original_title, r.original_name].filter(Boolean),
+        year: fecha ? Number(String(fecha).slice(0, 4)) : null,
+        // Viene en la respuesta, así que no hace falta abrir la ficha después.
+        posterPath: r.poster_path || null,
+        backdropPath: r.backdrop_path || null
+      });
+    }
+  }
+  return candidatos;
+}
+
 async function findTmdbMatch(series) {
   const cacheKey = `${series.ContentType}|${series.Title}|${series.ReleaseYear || ''}`;
   if (matchCache.has(cacheKey)) return matchCache.get(cacheKey);
@@ -284,13 +359,26 @@ async function findTmdbMatch(series) {
   const variants = queries.map(normalizeSearchTitle).filter(Boolean);
   const candidates = [];
 
+  // Con clave se pregunta a la API, que encuentra los títulos de estreno
+  // latinoamericanos; sin ella se raspa la web pública, que es como funcionaba
+  // antes y sigue funcionando en un servidor sin registrar. Los filtros de
+  // identidad son los mismos en los dos caminos: la fuente cambia, el rigor no.
+  const porApi = hayClave();
+
   for (let index = 0; index < queries.length; index += 1) {
-    const searchUrl = `${TMDB_BASE_URL}/search?query=${encodeURIComponent(queries[index])}`;
-    const searchHtml = await requestText(searchUrl);
     // El título original acierta más que la traducción, pero solo cuando el
     // alias existe: por eso la ventaja baja con cada intento posterior.
     const queryBonus = index === 0 ? 0 : Math.max(20 - index * 5, 5);
-    candidates.push(...parseTmdbSearchResults(searchHtml)
+
+    let encontrados;
+    if (porApi) {
+      encontrados = await buscarPorApi(series, queries[index]);
+    } else {
+      const searchUrl = `${TMDB_BASE_URL}/search?query=${encodeURIComponent(queries[index])}`;
+      encontrados = parseTmdbSearchResults(await requestText(searchUrl));
+    }
+
+    candidates.push(...encontrados
       .filter((candidate) =>
         isCompatibleMediaType(candidate, series) && isStrongTitleMatch(candidate, series, variants))
       .map((candidate) => ({

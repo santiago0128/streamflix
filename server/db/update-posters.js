@@ -173,14 +173,21 @@ async function resolveFromTmdb(series) {
   }
   if (!match) return { ok: false, reason: 'sin ficha en TMDB que case con el título y el año' };
 
-  let detailHtml;
-  try {
-    detailHtml = await requestText(`${TMDB_BASE_URL}${match.path}`);
-  } catch (error) {
-    return { ok: false, reason: `no se pudo leer la ficha: ${error.message || error}`, fallo: true };
+  // La API ya devuelve la ruta de la portada en la propia búsqueda, así que no
+  // hay que abrir la ficha para extraerla del HTML: una petición menos por
+  // título y sin depender de la maquetación de la web, que cambia sin avisar.
+  let file = match.posterPath || null;
+
+  if (!file) {
+    let detailHtml;
+    try {
+      detailHtml = await requestText(`${TMDB_BASE_URL}${match.path}`);
+    } catch (error) {
+      return { ok: false, reason: `no se pudo leer la ficha: ${error.message || error}`, fallo: true };
+    }
+    file = extractPosterFile(detailHtml);
   }
 
-  const file = extractPosterFile(detailHtml);
   if (!file) return { ok: false, reason: 'la ficha de TMDB no tiene portada' };
 
   return {
