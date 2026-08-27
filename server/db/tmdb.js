@@ -303,6 +303,16 @@ async function findTmdbMatch(series) {
   const unique = [...new Map(candidates.map((candidate) => [candidate.path, candidate])).values()];
   unique.sort((left, right) => right.score - left.score);
 
+  // Sin año guardado no hay con qué desambiguar, y varias películas distintas
+  // pueden declarar exactamente el mismo título: hay una "Pantera Negra" de 1993
+  // y otra de 1968, y ninguna es la de 2018. isStrongTitleMatch deja pasar a
+  // todas cuando falta el año, así que elegir la de más puntos es adivinar.
+  // Devolver null mantiene la promesa de la cabecera: antes ninguna que dudosa.
+  if (!series.ReleaseYear && unique.length > 1) {
+    matchCache.set(cacheKey, null);
+    return null;
+  }
+
   const best = unique[0];
   const match = best || null;
   matchCache.set(cacheKey, match);

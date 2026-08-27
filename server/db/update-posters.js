@@ -28,8 +28,9 @@
 require('dotenv').config();
 const fs = require('fs');
 const { sql, getPool } = require('../db');
-const { TMDB_BASE_URL, findTmdbMatch, requestText } = require('./tmdb');
+const { TMDB_BASE_URL, findTmdbMatch, requestText, normalizeSearchTitle } = require('./tmdb');
 const { fetchAnimeArtwork } = require('./anilist');
+const { findEnglishTitle } = require('./wikidata');
 const { imagenViva } = require('../lib/imagen');
 
 // 500 px de ancho: la ficha de detalle es la que más la agranda y ahí ya se ve
@@ -39,7 +40,14 @@ const POSTER_CDN = 'https://image.tmdb.org/t/p/w500';
 // Orígenes que ya sirven una portada buena y estable. Lo que esté aquí no se
 // toca sin --force: el anime importado de Kitsu, por ejemplo, ya trae la suya, y
 // cambiarla por otra no la mejora.
-const CDN_BUENOS = /(^|\.)(tmdb\.org|kitsu\.io|kitsu\.app|anilist\.co|anili\.st)$/;
+//
+// themoviedb.org va aquí junto a tmdb.org porque son el mismo sitio: TMDB sirve
+// hoy las imágenes desde media.themoviedb.org y antes desde image.tmdb.org, con
+// el mismo fichero al final de la ruta. Sin esto, la pasada diaria proponía
+// reescribir dos docenas de fichas —Iron Man entre ellas— para cambiar sólo el
+// host de una imagen idéntica: mucho ruido, ningún arreglo, y una escritura
+// diaria en filas que ya estaban bien.
+const CDN_BUENOS = /(^|\.)(tmdb\.org|themoviedb\.org|kitsu\.io|kitsu\.app|anilist\.co|anili\.st)$/;
 
 const TIPOS = ['movie', 'series', 'anime'];
 
@@ -68,6 +76,34 @@ function parseArgs(argv) {
   }
 
   return args;
+}
+
+/**
+ * ¿Son la misma imagen, aunque la URL no sea idéntica?
+ *
+ * TMDB sirve el mismo fichero desde image.tmdb.org y desde media.themoviedb.org,
+ * y el nombre del fichero es su identidad. Comparando la URL entera, una portada
+ * correcta guardada con el host antiguo se veía como distinta de la resuelta con
+ * el nuevo, y la pasada diaria reescribía dos docenas de fichas —Iron Man entre
+ * ellas— sin cambiar la imagen. Lo que ya está bien no se toca.
+ */
+function mismaImagen(a, b) {
+  const clave = (url) => {
+    const texto = String(url || '').trim();
+    if (!texto) return '';
+    try {
+      const { hostname, pathname } = new URL(texto);
+      // /t/p/w500/abc.jpg -> abc.jpg, que es lo que identifica la imagen.
+      if (/(^|\.)(tmdb\.org|themoviedb\.org)$/.test(hostname)) {
+        return `tmdb:${pathname.split('/').filter(Boolean).pop() || ''}`;
+      }
+      return texto;
+    } catch {
+      return texto;
+    }
+  };
+  const claveA = clave(a);
+  return Boolean(claveA) && claveA === clave(b);
 }
 
 function yaEsBuena(url) {
@@ -113,6 +149,25 @@ async function resolveFromTmdb(series) {
   let match;
   try {
     match = await findTmdbMatch(series);
+
+    // TMDB indexa por título original: su buscador no encuentra "Sueño de fuga"
+    // ni "Todo a la vez en todas partes", que es como los titula el sitio del
+    // que se importan. Wikidata sí los conoce y da el nombre en inglés, así que
+    // se reintenta con él antes de darse por vencido. Sin esto esas fichas se
+    // quedaban sin portada por mucho que se repitiera la pasada diaria.
+    if (!match) {
+      const enIngles = await findEnglishTitle(series);
+      if (enIngles && normalizeSearchTitle(enIngles.title) !== normalizeSearchTitle(series.Title)) {
+        match = await findTmdbMatch({
+          ...series,
+          Title: enIngles.title,
+          // El año de Wikidata sólo se usa si no había ninguno: es un dato de
+          // apoyo para desambiguar, no una corrección del catálogo.
+          ReleaseYear: series.ReleaseYear || enIngles.year || null
+        });
+        if (match) match = { ...match, viaTituloOriginal: enIngles.title };
+      }
+    }
   } catch (error) {
     return { ok: false, reason: `TMDB no respondió a la búsqueda: ${error.message || error}`, fallo: true };
   }
@@ -293,7 +348,7 @@ async function main() {
         continue;
       }
 
-      if (String(series.PosterUrl || '') === String(outcome.url || '')) {
+      if (mismaImagen(series.PosterUrl, outcome.url)) {
         validadas += 1;
         console.log(
           `✓ [${series.ContentType}] #${series.Id} ${series.Title} — identidad y portada verificadas (${outcome.origen})`
