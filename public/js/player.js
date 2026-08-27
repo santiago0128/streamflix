@@ -17,7 +17,6 @@ const Player = (() => {
   const introMarker = document.getElementById('introMarker');
 
   const btnPlay = document.getElementById('btnPlay');
-  const btnPrev = document.getElementById('btnPrev');
   const btnNext = document.getElementById('btnNext');
   const btnMute = document.getElementById('btnMute');
   const btnFs = document.getElementById('btnFs');
@@ -445,7 +444,6 @@ const Player = (() => {
     toggleEpMenu(false);
     skipIntroBtn.hidden = true;
     nextEpBtn.hidden = true;
-    btnPrev.disabled = index === 0;
     btnNext.disabled = !hasNext();
     btnNext.title = hasNext() ? 'Siguiente episodio' : 'No hay más episodios';
     // En una película no hay siguiente nunca: el botón sobra, no se desactiva.
@@ -698,7 +696,6 @@ const Player = (() => {
   // ver los controles pararía la película.
   video.addEventListener('click', () => { if (esMovil()) showUI(); else togglePlay(); });
   btnNext.addEventListener('click', next);
-  btnPrev.addEventListener('click', prev);
   btnNextCenter.addEventListener('click', () => { next(); showUI(); });
 
   btnEpisodes.addEventListener('click', (e) => {

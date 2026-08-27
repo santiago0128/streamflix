@@ -538,7 +538,6 @@ button { font-family: inherit; cursor: pointer; }
   /* Lo que se movió al centro sobra abajo, y el volumen lo llevan las teclas
      físicas del teléfono. */
   .player-controls #btnPlay,
-  .player-controls #btnPrev,
   .player-controls #btnNext,
   .player-controls .volume input[type=range] { display: none; }
 
