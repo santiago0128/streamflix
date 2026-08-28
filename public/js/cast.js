@@ -26,22 +26,41 @@ const Casting = (() => {
   let ganchos = { obtenerMedia: null, alEmpezar: null, alTerminar: null };
 
   let castListo = false;
+  let sdkCargado = false;
   let sesionCast = null;
   let airplayDisponible = false;
   let video = null;
+  let avisoTimer = null;
 
   const hayCast = () => castListo && window.cast?.framework;
   const transmitiendo = () => Boolean(sesionCast) || Boolean(video?.webkitCurrentPlaybackTargetIsWireless);
 
   // ------------------------------------------------------------- interfaz
 
+  // El boton se muestra siempre que el reproductor este abierto, aunque no haya
+  // a donde transmitir. Ocultarlo parecia mas limpio, pero para quien lo mira
+  // "no disponible" y "roto" se ven igual: un hueco. Es mejor enseñarlo apagado
+  // y explicar el motivo al pulsarlo, que es informacion que solo tenemos aqui.
   function pintarBoton() {
     if (!boton) return;
-    const disponible = hayCast() || airplayDisponible;
-    boton.hidden = !disponible;
+    boton.hidden = false;
     boton.classList.toggle('is-casting', transmitiendo());
-    boton.title = transmitiendo() ? 'Dejar de transmitir' : 'Transmitir a un televisor';
+    boton.classList.toggle('is-unavailable', !hayCast() && !airplayDisponible);
+    boton.title = transmitiendo()
+      ? 'Dejar de transmitir'
+      : (hayCast() || airplayDisponible ? 'Transmitir a un televisor' : 'Transmitir (no disponible aquí)');
     boton.setAttribute('aria-label', boton.title);
+  }
+
+  /** Por que no se puede transmitir, en una frase que se pueda leer. */
+  function motivoNoDisponible() {
+    if (!window.chrome || !navigator.userAgent.includes('Chrome')) {
+      return 'Transmitir a Chromecast necesita Chrome. En Safari puedes usar AirPlay.';
+    }
+    if (!sdkCargado) {
+      return 'No se pudo cargar el servicio de Google Cast. Puede que lo bloquee una extensión.';
+    }
+    return 'No encontré ningún televisor. Comprueba que esté encendido y en la misma red.';
   }
 
   function mostrarAviso(dispositivo) {
@@ -84,7 +103,8 @@ const Casting = (() => {
     // Si no carga (sin red, o un bloqueador), no pasa nada: queda AirPlay y,
     // si tampoco, el botón sigue oculto. Transmitir es un extra, no un
     // requisito para ver el vídeo.
-    script.onerror = () => { castListo = false; pintarBoton(); };
+    script.onload = () => { sdkCargado = true; };
+    script.onerror = () => { sdkCargado = false; castListo = false; pintarBoton(); };
     document.head.appendChild(script);
   }
 
@@ -168,7 +188,16 @@ const Casting = (() => {
       video.webkitShowPlaybackTargetPicker();
       return;
     }
-    if (!hayCast()) return;
+    if (!hayCast()) {
+      const t = document.getElementById('toast');
+      if (t) {
+        t.textContent = motivoNoDisponible();
+        t.hidden = false;
+        clearTimeout(avisoTimer);
+        avisoTimer = setTimeout(() => { t.hidden = true; }, 5000);
+      }
+      return;
+    }
 
     try {
       // Abre el selector de aparatos del navegador. Si el usuario lo cierra sin

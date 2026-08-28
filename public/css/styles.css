@@ -375,6 +375,9 @@ button { font-family: inherit; cursor: pointer; }
    tiñe del color de marca: es la unica pista en la barra de que el video no
    esta sonando aqui, y tiene que verse de un vistazo. */
 .cast-btn.is-casting { color: var(--accent); opacity: 1; }
+/* Apagado, no oculto: se ve que la funcion existe y al pulsarlo dice por que no
+   puede usarse aqui. Un hueco no distingue "no disponible" de "roto". */
+.cast-btn.is-unavailable { opacity: .38; }
 
 /* Ocupa el hueco del video, que durante la transmision esta parado y en negro.
    Sin esto la web parece rota justo cuando mas esta funcionando. */
