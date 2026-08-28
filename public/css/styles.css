@@ -649,6 +649,40 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 0 0 6px rgba(0, 0, 0, .55);
 }
 
+/* ===================== MODO TELEVISION ===================== */
+/*
+ * Se activa con ?tv=1 (lo pone tv.js en <html>). A tres metros, la interfaz de
+ * escritorio se queda pequeña: no es cuestion de gusto, es que los titulos de
+ * las fichas no se leen.
+ *
+ * Se escala la raiz en vez de reescribir tamaños porque la hoja esta en px de
+ * punta a punta —cero rem en 749 medidas— y tocarlos uno a uno seria rehacerla
+ * entera con riesgo de romper el diseño de escritorio, que funciona.
+ */
+html.tv { zoom: 1.35; }
+
+/* No hay raton que mover: el cursor solo estorba si el navegador lo dibuja. */
+html.tv, html.tv * { cursor: none; }
+
+/* El anillo de foco es LA referencia de donde estas, y a esa distancia el de
+   escritorio se pierde. Aqui va mas grueso y con halo. */
+html.tv :focus-visible {
+  outline: 4px solid var(--accent);
+  outline-offset: 4px;
+  box-shadow: 0 0 0 8px rgba(139, 92, 246, .22);
+}
+
+/* Sin puntero no hay hover, asi que el realce tiene que venir del foco: sin
+   esto la tarjeta enfocada se distingue del resto solo por el contorno. */
+html.tv .card:focus-visible {
+  transform: translateY(-6px) scale(1.04);
+  z-index: 2;
+}
+
+/* Deja aire alrededor de lo enfocado al desplazarse, para que nunca quede
+   pegado al borde de la pantalla. */
+html.tv .grid, html.tv .carousel-track { scroll-padding: 80px; }
+
 /* ===================== TOAST ===================== */
 .toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 100;
   background: var(--card); border: 1px solid var(--border); color: var(--text);

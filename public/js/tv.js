@@ -11,6 +11,23 @@
 // una pestaña normal, el problema y la solución son los mismos.
 
 (() => {
+  // ------------------------------------------------- modo television
+  //
+  // Se activa con ?tv=1 y se recuerda, para que baste con guardar la direccion
+  // una vez en el navegador del televisor. Se apaga con ?tv=0.
+  //
+  // Se pide explicitamente en vez de adivinarlo por el tamaño de pantalla: un
+  // monitor de escritorio grande da las mismas medidas que un televisor y
+  // agrandarle todo seria molesto. Aqui quien lo sabe es quien lo abre.
+  function aplicarModoTv() {
+    const params = new URLSearchParams(location.search);
+    const pedido = params.get('tv');
+    if (pedido === '1') localStorage.setItem('noxis:tv', '1');
+    if (pedido === '0') localStorage.removeItem('noxis:tv');
+    if (localStorage.getItem('noxis:tv') === '1') document.documentElement.classList.add('tv');
+  }
+  aplicarModoTv();
+
   const FOCUSABLES = [
     'a[href]', 'button:not([disabled])', 'input:not([disabled])',
     'select:not([disabled])', 'textarea:not([disabled])',
@@ -111,4 +128,18 @@
 
     if (mover(e.key)) e.preventDefault();
   });
+
+  // Con mando no hay puntero: si al abrir no hay nada enfocado, la primera
+  // flecha se gasta solo en colocar el foco. Se coloca de entrada sobre la
+  // primera tarjeta, que es lo que se quiere tocar.
+  if (document.documentElement.classList.contains('tv')) {
+    const enfocarPrimero = () => {
+      if (document.activeElement && document.activeElement !== document.body) return;
+      const tarjeta = document.querySelector('.card, .calendar-event');
+      (tarjeta || candidatos()[0])?.focus();
+    };
+    // Un respiro: el catalogo se pinta despues de la primera peticion, asi que
+    // enfocar de inmediato no encontraria ninguna tarjeta.
+    window.addEventListener('load', () => setTimeout(enfocarPrimero, 900));
+  }
 })();
