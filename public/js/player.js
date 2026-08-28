@@ -511,6 +511,10 @@ const Player = (() => {
     // reproductor cerrado no hay ningún motivo para sonar. Cubre los avisos que
     // llegan tarde, como el MANIFEST_PARSED de hls.js.
     if (overlay.hidden) return;
+    // Con la tele reproduciendo, esto sonaria a la vez y descolocado. No cubre
+    // AirPlay a proposito: alli la salida de este mismo <video> es la que va a
+    // la tele, asi que pararlo lo pararia todo.
+    if (window.Casting && Casting.enCast()) return;
     video.play().catch((error) => {
       // Si el navegador bloquea el autoplay con sonido, se reintenta en silencio
       // antes de dejar el video parado.

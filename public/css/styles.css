@@ -370,6 +370,21 @@ button { font-family: inherit; cursor: pointer; }
 .skip-btn.next-ep { background: var(--accent); color: #fff; }
 .skip-btn.next-ep:hover { background: var(--accent-hover); }
 
+/* ---- Boton "Ver en TV" de la barra superior ---- */
+.btn-tv { display: inline-flex; align-items: center; gap: 7px; }
+/* Transmitiendo, tiene que cantar desde cualquier pantalla: es el unico aviso
+   de que lo que abras va a sonar en otra habitacion y no aqui. */
+.btn-tv.is-casting {
+  color: #fff;
+  background: rgba(139, 92, 246, .3);
+  border-color: rgba(184, 130, 255, .65);
+}
+@media (max-width: 900px) {
+  /* En movil manda el icono: la barra no da para otra etiqueta al lado de
+     Donar e Iniciar sesion. */
+  .btn-tv .btn-tv-text { display: none; }
+}
+
 /* ---- Transmitir a un televisor ---- */
 /* Hereda .ctrl, asi que en reposo es un icono mas de la barra. Al transmitir se
    tiñe del color de marca: es la unica pista en la barra de que el video no

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Noxis en el televisor</title>
+
+  <!--
+    Receptor de Cast: esta pagina NO se abre en un navegador normal. La carga el
+    Google TV cuando alguien pulsa "Ver en TV", y es lo unico que se ve en la
+    pantalla grande.
+
+    Se apoya en <cast-media-player>, el reproductor que trae el SDK ya montado:
+    barra de progreso, caratula, titulo, estados de carga y control por voz. Se
+    personaliza con variables CSS. Escribir uno propio significaria rehacer todo
+    eso —y su integracion con el mando y con el sistema— para acabar en lo
+    mismo con mas fallos.
+
+    No lleva navegacion de catalogo a proposito: en Cast quien elige es el
+    movil. Un receptor no recibe las flechas del mando, porque el modelo da por
+    hecho que el aparato puede no tener ninguno.
+  -->
+  <style>
+    body {
+      margin: 0;
+      background: #12081f;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+
+    /* El SDK expone el aspecto por variables. Se toman las de la web para que
+       la tele no parezca otro producto distinto. */
+    cast-media-player {
+      --background-color: #12081f;
+      --logo-background: #12081f;
+      --splash-background: #12081f;
+      --theme-hue: 265;
+      --progress-color: #8b5cf6;
+      --playback-logo-image: url('/img/icon-512.png');
+      --splash-image: url('/img/icon-512.png');
+      --title-color: #ffffff;
+      --subtitle-color: #c9bde0;
+      --font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <cast-media-player></cast-media-player>
+
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+  <script>
+    const contexto = cast.framework.CastReceiverContext.getInstance();
+    const controlador = contexto.getPlayerManager();
+
+    // Los enlaces del catalogo son HLS servidos por el proxy de Noxis. El
+    // receptor los reproduce nativamente, pero hay que declarar el tipo cuando
+    // el emisor no lo diga: sin eso intenta adivinarlo por la extension y un
+    // .m3u8 con parametros de firma no siempre se reconoce.
+    controlador.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD,
+      (peticion) => {
+        const media = peticion.media || {};
+        if (!media.contentType && /\.m3u8(\?|$)/i.test(media.contentUrl || media.contentId || '')) {
+          media.contentType = 'application/x-mpegurl';
+        }
+        // streamType BUFFERED permite adelantar y retroceder; sin declararlo,
+        // algunos receptores tratan el HLS como emision en directo y la barra
+        // de progreso se queda muerta.
+        if (!media.streamType) media.streamType = 'BUFFERED';
+        peticion.media = media;
+        return peticion;
+      }
+    );
+
+    // Un fallo de reproduccion tiene que llegar al movil: si el receptor se
+    // queda en negro sin decir nada, desde el emisor parece que la
+    // transmision sigue viva y no hay forma de saber que paso.
+    controlador.addEventListener(
+      cast.framework.events.EventType.ERROR,
+      (evento) => console.error('Error de reproduccion en el receptor:', evento)
+    );
+
+    contexto.start({
+      // Sin esto el receptor se cierra al poco de pausar, y volver obliga a
+      // empezar la transmision otra vez.
+      disableIdleTimeout: false,
+      maxInactivity: 3600
+    });
+  </script>
+</body>
+</html>

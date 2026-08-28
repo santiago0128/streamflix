@@ -24,9 +24,22 @@ const Casting = (() => {
   // llamada a cast.framework.CastContext reventaba dentro del callback y el
   // modulo se quedaba a medias sin decir nada.
   const SDK = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1';
-  const RECEPTOR_POR_DEFECTO = 'CC1AD845'; // Default Media Receiver de Google
+  // Receptor generico de Google: reproduce, pero con su marca y su aspecto.
+  const RECEPTOR_POR_DEFECTO = 'CC1AD845';
+
+  /**
+   * Id de la aplicacion receptora. Con uno propio, el televisor carga
+   * /receptor.html —la interfaz de Noxis— en vez de la pantalla generica.
+   *
+   * Se obtiene registrando la aplicacion en la consola de desarrolladores de
+   * Cast, apuntandola a https://noxis.com.co/receptor.html. Hasta que exista,
+   * se usa el receptor de Google: transmite igual, solo que sin la marca. Asi
+   * esto no deja de funcionar mientras se hace el tramite.
+   */
+  const receptor = () => window.NOXIS_CAST_APP_ID || RECEPTOR_POR_DEFECTO;
 
   let boton = null;
+  let botonBarra = null;
   let aviso = null;
   let ganchos = { obtenerMedia: null, alEmpezar: null, alTerminar: null };
 
@@ -104,7 +117,7 @@ const Casting = (() => {
       try {
       const contexto = cast.framework.CastContext.getInstance();
       contexto.setOptions({
-        receiverApplicationId: RECEPTOR_POR_DEFECTO,
+        receiverApplicationId: receptor(),
         // ORIGIN_SCOPED: si esta misma web ya tenía una sesión abierta, se
         // reengancha sola al recargar en vez de pedir el aparato otra vez.
         autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
@@ -155,6 +168,7 @@ const Casting = (() => {
       if (ganchos.alTerminar) ganchos.alTerminar(posicion);
     }
     pintarBoton();
+    pintarBotonBarra();
   }
 
   async function enviarMedia() {
@@ -253,6 +267,20 @@ const Casting = (() => {
     if (sesionCast) enviarMedia();
   }
 
+  /**
+   * Boton "Ver en TV" de la barra superior. Es el mismo alternar que el del
+   * reproductor: abre el selector, o corta si ya se esta transmitiendo. Se
+   * separa porque vive fuera del reproductor y tiene que reflejar el estado
+   * aunque no haya nada abierto.
+   */
+  function pintarBotonBarra() {
+    if (!botonBarra) return;
+    const activo = transmitiendo();
+    botonBarra.classList.toggle('is-casting', activo);
+    const texto = botonBarra.querySelector('.btn-tv-text');
+    if (texto) texto.textContent = activo ? 'En el televisor' : 'Ver en TV';
+  }
+
   function init(opciones = {}) {
     video = opciones.video || document.getElementById('video');
     boton = opciones.boton || document.getElementById('btnCast');
@@ -264,12 +292,21 @@ const Casting = (() => {
     };
 
     if (boton) boton.addEventListener('click', alternar);
+
+    botonBarra = opciones.botonBarra || document.getElementById('btnVerEnTv');
+    if (botonBarra) botonBarra.addEventListener('click', alternar);
+    pintarBotonBarra();
     prepararAirPlay();
     cargarSdk();
     pintarBoton();
   }
 
-  return { init, alternar, detener, refrescar, transmitiendo };
+  // transmitiendo() incluye AirPlay, donde este <video> sigue siendo el que
+  // reproduce. enCast() es solo la sesion de Cast: ahi el que reproduce es el
+  // televisor y lo de aqui tiene que callarse.
+  const enCast = () => Boolean(sesionCast);
+
+  return { init, alternar, detener, refrescar, transmitiendo, enCast };
 })();
 
 // Explicito y no por efecto de la declaracion: una `const` de nivel superior
