@@ -60,7 +60,10 @@ const Casting = (() => {
     if (!sdkCargado) {
       return 'No se pudo cargar el servicio de Google Cast. Puede que lo bloquee una extensión.';
     }
-    return 'No encontré ningún televisor. Comprueba que esté encendido y en la misma red.';
+    // Aqui el SDK esta pero el motor no arranco. NO es "no hay televisores":
+    // los aparatos se buscan al abrir el selector, no antes, asi que decir eso
+    // mandaba a revisar la tele cuando el problema estaba en el navegador.
+    return 'Google Cast no llegó a arrancar en este navegador. Prueba a recargar, o transmite desde el menú de Chrome (⋮ → Transmitir).';
   }
 
   function mostrarAviso(dispositivo) {
