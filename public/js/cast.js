@@ -31,6 +31,7 @@ const Casting = (() => {
   let airplayDisponible = false;
   let video = null;
   let avisoTimer = null;
+  let inicioCarga = 0;
 
   const hayCast = () => castListo && window.cast?.framework;
   const transmitiendo = () => Boolean(sesionCast) || Boolean(video?.webkitCurrentPlaybackTargetIsWireless);
@@ -52,18 +53,30 @@ const Casting = (() => {
     boton.setAttribute('aria-label', boton.title);
   }
 
-  /** Por que no se puede transmitir, en una frase que se pueda leer. */
+  /**
+   * Por que no se puede transmitir, en una frase que se pueda leer.
+   *
+   * Lleva pegado el estado interno entre corchetes. Queda feo, pero es lo que
+   * permite distinguir desde fuera tres fallos que se parecen mucho y se
+   * arreglan distinto, sin pedirle a nadie que abra la consola.
+   */
   function motivoNoDisponible() {
-    if (!window.chrome || !navigator.userAgent.includes('Chrome')) {
+    const estado = `[sdk=${sdkCargado ? 1 : 0} api=${window.cast?.framework ? 1 : 0} listo=${castListo ? 1 : 0}]`;
+
+    if (!navigator.userAgent.includes('Chrome') || /OPR|Firefox/.test(navigator.userAgent)) {
       return 'Transmitir a Chromecast necesita Chrome. En Safari puedes usar AirPlay.';
     }
     if (!sdkCargado) {
-      return 'No se pudo cargar el servicio de Google Cast. Puede que lo bloquee una extensión.';
+      return `No se pudo cargar el servicio de Google Cast; puede que lo bloquee una extensión. ${estado}`;
     }
-    // Aqui el SDK esta pero el motor no arranco. NO es "no hay televisores":
-    // los aparatos se buscan al abrir el selector, no antes, asi que decir eso
-    // mandaba a revisar la tele cuando el problema estaba en el navegador.
-    return 'Google Cast no llegó a arrancar en este navegador. Prueba a recargar, o transmite desde el menú de Chrome (⋮ → Transmitir).';
+    // El SDK tarda un momento en arrancar despues de descargarse. Pulsar en esa
+    // ventana no es un fallo, solo prisa, y merece otro mensaje.
+    if (Date.now() - inicioCarga < 6000) {
+      return 'Google Cast todavía está arrancando. Inténtalo otra vez en un segundo.';
+    }
+    // SDK descargado pero el motor no arranca. NO es "no hay televisores": los
+    // aparatos se buscan al abrir el selector, no antes.
+    return `Google Cast no arrancó. Prueba el menú de Chrome (⋮ → Transmitir); si ahí sí aparece tu Google TV, dímelo. ${estado}`;
   }
 
   function mostrarAviso(dispositivo) {
@@ -100,6 +113,7 @@ const Casting = (() => {
       pintarBoton();
     };
 
+    inicioCarga = Date.now();
     const script = document.createElement('script');
     script.src = SDK;
     script.async = true;
