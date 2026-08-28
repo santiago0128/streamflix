@@ -158,6 +158,8 @@ const Casting = (() => {
       const nombre = sesionCast?.getCastDevice?.()?.friendlyName;
       mostrarAviso(nombre);
       if (ganchos.alEmpezar) ganchos.alEmpezar(nombre);
+      // Solo al empezar. En SESSION_RESUMED el televisor ya puede estar
+      // reproduciendo, y reenviar el video lo haria empezar de nuevo.
       if (estado === E.SESSION_STARTED) enviarMedia();
     } else if (estado === E.SESSION_ENDED) {
       // Se devuelve la posición del televisor para seguir aquí justo donde se
@@ -171,9 +173,27 @@ const Casting = (() => {
     pintarBotonBarra();
   }
 
+  /** Mensaje breve en la pantalla desde la que se manda. */
+  function avisar(texto, ms = 5000) {
+    const t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = texto;
+    t.hidden = false;
+    clearTimeout(avisoTimer);
+    avisoTimer = setTimeout(() => { t.hidden = true; }, ms);
+  }
+
   async function enviarMedia() {
     const media = ganchos.obtenerMedia && ganchos.obtenerMedia();
-    if (!media || !media.url || !sesionCast) return;
+    if (!sesionCast) return;
+
+    // Conectar desde la barra, sin nada abierto, deja el televisor en la
+    // pantalla de espera. Es correcto —no hay video que mandar— pero desde
+    // fuera se lee como que la transmision no funciona, asi que se dice.
+    if (!media || !media.url) {
+      avisar('Conectado al televisor. Abre una película y empezará a verse ahí.', 6000);
+      return;
+    }
 
     const info = new chrome.cast.media.MediaInfo(media.url, media.contentType || 'application/vnd.apple.mpegurl');
     info.streamType = chrome.cast.media.StreamType.BUFFERED;

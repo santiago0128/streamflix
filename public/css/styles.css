@@ -674,7 +674,16 @@ button { font-family: inherit; cursor: pointer; }
  * punta a punta —cero rem en 749 medidas— y tocarlos uno a uno seria rehacerla
  * entera con riesgo de romper el diseño de escritorio, que funciona.
  */
-html.tv { zoom: 1.35; }
+/* Aleja en vez de acercar: el navegador del televisor ya dibuja grande de
+   partida, asi que lo que falta es que quepa mas catalogo en una pantalla
+   ancha. El valor se ajusta con ?zoom=N y queda guardado, porque el bueno
+   depende de la tele y de la distancia y no se puede acertar a ciegas. */
+html.tv { zoom: var(--tv-zoom, 0.8); }
+
+/* Con la pantalla mas ancha y las portadas mas pequeñas, caben mas columnas.
+   Sin esto, alejar solo dejaba franjas vacias a los lados. */
+html.tv .grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 22px; }
+html.tv .content { padding-left: 46px; padding-right: 46px; }
 
 /* No hay raton que mover: el cursor solo estorba si el navegador lo dibuja. */
 html.tv, html.tv * { cursor: none; }

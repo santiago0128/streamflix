@@ -19,12 +19,31 @@
   // Se pide explicitamente en vez de adivinarlo por el tamaño de pantalla: un
   // monitor de escritorio grande da las mismas medidas que un televisor y
   // agrandarle todo seria molesto. Aqui quien lo sabe es quien lo abre.
+  // El navegador de un Android TV suele declarar un viewport de ~960 px sobre
+  // una pantalla de 1080, asi que la interfaz ya sale al doble de tamaño antes
+  // de tocar nada. Por eso el ajuste por defecto ALEJA en vez de acercar: lo
+  // que hace falta en una tele no es agrandar, es que quepa mas catalogo.
+  const ZOOM_POR_DEFECTO = 0.8;
+
   function aplicarModoTv() {
     const params = new URLSearchParams(location.search);
     const pedido = params.get('tv');
     if (pedido === '1') localStorage.setItem('noxis:tv', '1');
-    if (pedido === '0') localStorage.removeItem('noxis:tv');
-    if (localStorage.getItem('noxis:tv') === '1') document.documentElement.classList.add('tv');
+    if (pedido === '0') { localStorage.removeItem('noxis:tv'); localStorage.removeItem('noxis:tvZoom'); }
+
+    // ?zoom=0.7 y queda guardado. Existe porque el valor bueno depende de la
+    // tele y de la distancia, y no hay forma de acertarlo desde aqui: asi se
+    // prueba en el sitio en vez de a ciegas y con un despliegue por intento.
+    const zoomPedido = Number(params.get('zoom'));
+    if (zoomPedido >= 0.4 && zoomPedido <= 2) {
+      localStorage.setItem('noxis:tvZoom', String(zoomPedido));
+    }
+
+    if (localStorage.getItem('noxis:tv') !== '1') return;
+    document.documentElement.classList.add('tv');
+
+    const zoom = Number(localStorage.getItem('noxis:tvZoom')) || ZOOM_POR_DEFECTO;
+    document.documentElement.style.setProperty('--tv-zoom', String(zoom));
   }
   aplicarModoTv();
 
