@@ -18,7 +18,12 @@
 // así que el televisor recibe un playlist que sabe leer.
 
 const Casting = (() => {
-  const SDK = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js';
+  // El ?loadCastFramework=1 NO es opcional: sin el, el cargador solo instala el
+  // API antiguo (chrome.cast) y `cast.framework` no llega a existir. El propio
+  // script lee ese parametro de su URL para decidirlo. Faltaba, y por eso la
+  // llamada a cast.framework.CastContext reventaba dentro del callback y el
+  // modulo se quedaba a medias sin decir nada.
+  const SDK = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1';
   const RECEPTOR_POR_DEFECTO = 'CC1AD845'; // Default Media Receiver de Google
 
   let boton = null;
@@ -96,6 +101,7 @@ const Casting = (() => {
     // antes de pedir el script o el aviso se pierde.
     window.__onGCastApiAvailable = (disponible) => {
       if (!disponible) return;
+      try {
       const contexto = cast.framework.CastContext.getInstance();
       contexto.setOptions({
         receiverApplicationId: RECEPTOR_POR_DEFECTO,
@@ -110,6 +116,13 @@ const Casting = (() => {
       );
 
       castListo = true;
+      } catch (error) {
+        // Sin esto la excepcion moria dentro del callback del SDK y el modulo
+        // se quedaba a medias en silencio, que es como se tardo en dar con el
+        // parametro que faltaba.
+        console.error('Google Cast no pudo inicializarse:', error);
+        castListo = false;
+      }
       pintarBoton();
     };
 
