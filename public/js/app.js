@@ -521,6 +521,15 @@
     const typeMeta = getContentTypeMeta(series.ContentType);
     const card = document.createElement('div');
     card.className = 'card reveal-up';
+    // Un <div> con un click encima no recibe foco, así que con el mando de una
+    // tele —o sólo con teclado— no había forma de llegar a ninguna ficha: el
+    // catálogo entero quedaba fuera de alcance. Se deja como div en vez de
+    // <button> porque el botón trae fondo, borde y tipografía propios que
+    // pelearían con los estilos de la tarjeta; con tabindex y rol se consigue
+    // lo mismo sin tocar el aspecto.
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', series.Title);
     card.innerHTML = `
       <span class="card-type">${typeMeta.label}</span>
       ${series.Rating != null ? `<span class="card-rating">★ ${Number(series.Rating).toFixed(1)}</span>` : ''}
@@ -533,6 +542,13 @@
         <div class="card-genres">${series.Genres || ''}</div>
       </div>`;
     card.addEventListener('click', () => openDetail(series.Id, series));
+    // Lo que un <button> haría solo: Enter y Espacio activan. El Espacio se
+    // frena antes porque si no la página baja una pantalla al mismo tiempo.
+    card.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      openDetail(series.Id, series);
+    });
     return card;
   }
 

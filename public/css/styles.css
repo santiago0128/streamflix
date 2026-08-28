@@ -613,6 +613,42 @@ button { font-family: inherit; cursor: pointer; }
   .player-title { font-size: 13px; }
 }
 
+/* ===================== FOCO / NAVEGACION CON MANDO ===================== */
+/*
+ * A tres metros de la tele, el foco tiene que verse de un vistazo: no hay
+ * puntero que te recuerde donde estas, y perderlo obliga a barrer la pantalla
+ * con las flechas hasta reencontrarlo. Por eso es un anillo grueso y del color
+ * de marca, no el contorno fino del navegador.
+ *
+ * :focus-visible y no :focus: asi el anillo sale con teclado y mando pero no al
+ * hacer clic con el raton, donde solo seria ruido.
+ */
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* En las tarjetas el anillo va pegado al borde y se acompaña de un realce: el
+   contorno solo se pierde sobre una portada clara. */
+.card:focus-visible,
+.calendar-event:focus-visible,
+.calendar-pending-card:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  transform: translateY(-4px);
+  box-shadow: 0 10px 30px rgba(139, 92, 246, .45);
+}
+
+/* Los controles del reproductor son claros sobre el video: el anillo necesita
+   un halo oscuro detras para no perderse en una escena luminosa. */
+.player-controls :focus-visible,
+.player-center :focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px rgba(0, 0, 0, .55);
+}
+
 /* ===================== TOAST ===================== */
 .toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 100;
   background: var(--card); border: 1px solid var(--border); color: var(--text);
