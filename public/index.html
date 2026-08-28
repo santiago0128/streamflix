@@ -202,7 +202,23 @@
   <div class="player-overlay" id="playerOverlay" hidden>
     <button class="player-close" id="playerClose" aria-label="Cerrar">✕</button>
     <div class="player-stage" id="playerStage">
-      <video id="video" playsinline></video>
+      <!-- x-webkit-airplay: sin esto Safari no ofrece AirPlay para este vídeo.
+           Es lo único que hace falta del lado del marcado; el selector de
+           aparatos lo pone el propio navegador. -->
+      <video id="video" playsinline x-webkit-airplay="allow"></video>
+
+      <!-- Mientras se transmite, el vídeo local se para y esta capa explica
+           dónde se está viendo. Sin ella la web parece rota: pantalla en negro
+           y nada que diga por qué. -->
+      <div class="cast-notice" id="castNotice" hidden>
+        <svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/>
+          <line x1="2" y1="20" x2="2.01" y2="20"/>
+        </svg>
+        <strong>Reproduciendo en <span class="cast-notice-device">el televisor</span></strong>
+        <span>Contrólalo desde el televisor. Aquí puedes pararlo y seguir viéndolo donde ibas.</span>
+      </div>
       <!-- Reproductores de terceros (Provider = 'embed'): no controlamos la
            reproducción, así que los controles propios se ocultan. -->
       <iframe id="videoEmbed" class="player-embed" hidden
@@ -299,6 +315,17 @@
             <button class="ctrl" id="btnMute" aria-label="Silenciar">🔊</button>
             <input type="range" id="volume" min="0" max="1" step="0.05" value="1" />
           </div>
+          <!-- Oculto mientras no haya a donde transmitir: un boton que no
+               lleva a ninguna parte solo genera la duda de por que no hace nada.
+               cast.js lo muestra cuando detecta Chromecast o AirPlay. -->
+          <button class="ctrl cast-btn" id="btnCast" title="Transmitir a un televisor"
+                  aria-label="Transmitir a un televisor" hidden>
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/>
+              <line x1="2" y1="20" x2="2.01" y2="20"/>
+            </svg>
+          </button>
           <button class="ctrl" id="btnFs" aria-label="Pantalla completa">⛶</button>
         </div>
       </div>
@@ -465,6 +492,7 @@
 
   <script src="/vendor/hls/hls.min.js"></script>
   <script src="/js/api.js"></script>
+  <script src="/js/cast.js"></script>
   <script src="/js/player.js"></script>
   <script src="/js/app.js"></script>
   <script>

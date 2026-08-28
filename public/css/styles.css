@@ -370,6 +370,25 @@ button { font-family: inherit; cursor: pointer; }
 .skip-btn.next-ep { background: var(--accent); color: #fff; }
 .skip-btn.next-ep:hover { background: var(--accent-hover); }
 
+/* ---- Transmitir a un televisor ---- */
+/* Hereda .ctrl, asi que en reposo es un icono mas de la barra. Al transmitir se
+   tiñe del color de marca: es la unica pista en la barra de que el video no
+   esta sonando aqui, y tiene que verse de un vistazo. */
+.cast-btn.is-casting { color: var(--accent); opacity: 1; }
+
+/* Ocupa el hueco del video, que durante la transmision esta parado y en negro.
+   Sin esto la web parece rota justo cuando mas esta funcionando. */
+.cast-notice {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; text-align: center; padding: 24px;
+  background: radial-gradient(circle at center, rgba(60, 30, 100, .5), rgba(0, 0, 0, .92));
+  color: #fff;
+}
+.cast-notice svg { color: var(--accent); }
+.cast-notice strong { font-size: 18px; font-weight: 600; }
+.cast-notice span { font-size: 14px; color: #c9bde0; max-width: 34ch; }
+
 .player-controls { position: absolute; bottom: 0; left: 0; right: 0; z-index: 3;
   padding: 20px 40px 22px; background: linear-gradient(0deg, rgba(0,0,0,.85), transparent);
   transition: opacity .3s; }

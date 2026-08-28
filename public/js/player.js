@@ -52,6 +52,8 @@ const Player = (() => {
   let playlist = [];   // episodios de la temporada
   let index = 0;       // episodio actual
   let seriesTitle = '';
+  // Fuente actual en forma enviable a un televisor; null si no se puede.
+  let mediaActual = null;
   let hideTimer = null;
   let hls = null;      // instancia de hls.js cuando el episodio es HLS
   let autoSkippedIntro = false;  // para no volver a saltar si el usuario retrocede
@@ -179,6 +181,7 @@ const Player = (() => {
     // reproductor ya cerrado y sin nada visible que pararlo. La guarda de
     // load() compara contra este número, así que basta con moverlo.
     loadSequence += 1;
+    if (window.Casting && Casting.transmitiendo()) Casting.detener();
     teardownSource();
     overlay.hidden = true;
     soltarPantalla();
@@ -474,6 +477,14 @@ const Player = (() => {
     const provider = String(playback?.provider || providerOf(ep)).toLowerCase();
     const playbackUrl = playback?.url || ep.VideoUrl;
     ep.__activeProvider = provider;
+    // Lo que hace falta para transmitir: el televisor descarga el vídeo por su
+    // cuenta, así que necesita la URL absoluta y el tipo. Un 'embed' no se
+    // puede enviar: ahí el vídeo lo sirve un iframe de otro dominio.
+    mediaActual = provider === 'embed' ? null : {
+      url: new URL(playbackUrl, location.origin).href,
+      contentType: playback?.contentType || (provider === 'hls' ? 'application/vnd.apple.mpegurl' : 'video/mp4')
+    };
+    if (window.Casting) Casting.refrescar();
     syncAudioSelect(playback);
 
     if (provider === 'embed') {
@@ -812,6 +823,40 @@ const Player = (() => {
     }
     showUI();
   });
+
+  // ---------------------------------------------------------- Transmitir
+  //
+  // El modulo de transmision no sabe nada del reproductor: se le pasa como
+  // obtener el video actual y que hacer cuando la reproduccion se va a la tele
+  // o vuelve. Asi cast.js se puede probar y cambiar sin tocar esto.
+  if (window.Casting) {
+    Casting.init({
+      video,
+      obtenerMedia: () => (mediaActual ? {
+        ...mediaActual,
+        titulo: playlist[index]?.Title || seriesTitle,
+        subtitulo: seriesTitle,
+        poster: playlist[index]?.ThumbnailUrl || '',
+        // Se continua donde iba: empezar de cero al transmitir obliga a buscar
+        // el punto a mano con el mando, que es incomodo justo cuando menos.
+        posicion: video.currentTime || 0
+      } : null),
+
+      alEmpezar: (_dispositivo, opciones = {}) => {
+        // En AirPlay este mismo <video> sigue siendo el que reproduce, solo que
+        // sacando imagen por la tele: pararlo aqui lo pararia todo. En Cast el
+        // que reproduce es el televisor, asi que lo de aqui sobra y molesta.
+        if (!opciones.mantenerLocal) video.pause();
+      },
+
+      alTerminar: (posicion, opciones = {}) => {
+        if (opciones.mantenerLocal) return;
+        if (overlay.hidden) return;      // se corto al cerrar el reproductor
+        if (posicion > 0) video.currentTime = posicion;
+        startPlayback();
+      }
+    });
+  }
 
   return { open, close };
 })();
