@@ -212,3 +212,10 @@ const Casting = (() => {
 
   return { init, alternar, detener, refrescar, transmitiendo };
 })();
+
+// Explicito y no por efecto de la declaracion: una `const` de nivel superior
+// vive en el ambito lexico global, que NO es `window`. Sin esta linea,
+// `typeof Casting` es "object" pero `window.Casting` es undefined, y las
+// guardas `if (window.Casting)` de player.js daban siempre falso: el modulo
+// se cargaba entero y no se inicializaba nunca, asi que el boton no aparecia.
+window.Casting = Casting;
