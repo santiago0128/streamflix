@@ -125,7 +125,11 @@ router.put('/:episodeId', async (req, res) => {
       ? durationFromBody
       : episode.DurationSec;
     const endThreshold = completionThreshold(durationSec);
-    const shouldDelete = positionSec <= 0 || (endThreshold != null && positionSec >= endThreshold);
+    // Llegar al final es la forma normal de dar un capítulo por visto: quien
+    // termina uno no debería tener que marcarlo también a mano. El otro motivo
+    // para borrar el progreso —volver al segundo cero— no es haberlo visto.
+    const completed = endThreshold != null && positionSec >= endThreshold;
+    const shouldDelete = positionSec <= 0 || completed;
 
     if (shouldDelete) {
       await pool.request()
@@ -135,7 +139,18 @@ router.put('/:episodeId', async (req, res) => {
           DELETE FROM dbo.WatchProgress
           WHERE UserId = @userId AND EpisodeId = @episodeId
         `);
-      return res.json({ ok: true, cleared: true });
+
+      if (completed) {
+        await pool.request()
+          .input('userId', sql.Int, req.user.id)
+          .input('episodeId', sql.Int, episodeId)
+          .query(`
+            IF NOT EXISTS (SELECT 1 FROM dbo.WatchedEpisodes WHERE UserId = @userId AND EpisodeId = @episodeId)
+              INSERT INTO dbo.WatchedEpisodes (UserId, EpisodeId) VALUES (@userId, @episodeId)
+          `);
+      }
+
+      return res.json({ ok: true, cleared: true, watched: completed });
     }
 
     await pool.request()

@@ -247,6 +247,31 @@ CREATE TABLE dbo.WatchProgress (
     CONSTRAINT FK_WatchProgress_Episodes FOREIGN KEY (EpisodeId) REFERENCES dbo.Episodes(Id) ON DELETE CASCADE
 );
 
+-- Capítulos ya vistos ("esto ya lo vi"), por usuario.
+--
+-- Va aparte de WatchProgress a propósito: esa tabla guarda por dónde se quedó
+-- uno y su fila se borra al terminar el capítulo, así que no distingue "no lo he
+-- empezado" de "lo terminé" — justo lo que hace falta para tachar lo visto en
+-- una serie de doscientos episodios. Aquí la fila solo existe si el capítulo se
+-- dio por visto, sea porque el reproductor llegó al final o porque se marcó a
+-- mano (lo visto fuera de la web no deja rastro de reproducción).
+IF OBJECT_ID('dbo.WatchedEpisodes', 'U') IS NULL
+CREATE TABLE dbo.WatchedEpisodes (
+    UserId    INT NOT NULL,
+    EpisodeId INT NOT NULL,
+    WatchedAt DATETIME2 NOT NULL CONSTRAINT DF_WatchedEpisodes_WatchedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_WatchedEpisodes PRIMARY KEY (UserId, EpisodeId),
+    CONSTRAINT FK_WatchedEpisodes_Users    FOREIGN KEY (UserId)    REFERENCES dbo.Users(Id)    ON DELETE CASCADE,
+    CONSTRAINT FK_WatchedEpisodes_Episodes FOREIGN KEY (EpisodeId) REFERENCES dbo.Episodes(Id) ON DELETE CASCADE
+);
+
+-- La ficha pregunta siempre lo mismo: "de esta serie, ¿cuáles vio este
+-- usuario?". Esa consulta entra por UserId y se cruza contra los episodios de
+-- una serie, así que la clave primaria (UserId, EpisodeId) ya la cubre; este
+-- índice es para el camino contrario, cuando se limpia por episodio.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_WatchedEpisodes_Episode' AND object_id = OBJECT_ID('dbo.WatchedEpisodes'))
+    CREATE INDEX IX_WatchedEpisodes_Episode ON dbo.WatchedEpisodes (EpisodeId);
+
 -- Solicitudes de contenido: lo que la gente pide que se importe.
 -- El estado lo mueve a mano quien atiende la cola; el importador vive en otro
 -- repositorio y no escribe aquí.

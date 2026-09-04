@@ -209,6 +209,21 @@
           <label for="detailAudioSelect">Idioma:</label>
           <select id="detailAudioSelect"></select>
         </div>
+        <div class="season-watched" id="seasonWatchedBar" hidden>
+          <div class="season-watched-head">
+            <span class="season-watched-count" id="seasonWatchedCount"></span>
+            <div class="season-watched-actions">
+              <button class="btn btn-ghost btn-small" id="seasonWatchedAll" type="button">Marcar todo visto</button>
+              <button class="btn btn-ghost btn-small" id="seasonWatchedNone" type="button">Quitar marcas</button>
+            </div>
+          </div>
+          <div class="season-watched-track"><span id="seasonWatchedProgress"></span></div>
+          <div class="season-watched-upto">
+            <label for="seasonWatchedUpTo">Ya vi hasta el capítulo</label>
+            <input type="number" id="seasonWatchedUpTo" min="1" step="1" inputmode="numeric" />
+            <button class="btn btn-ghost btn-small" id="seasonWatchedUpToBtn" type="button">Marcar</button>
+          </div>
+        </div>
         <div class="episode-list" id="episodeList"></div>
         <div class="detail-episode-pagination" id="detailEpisodePagination" hidden></div>
       </div>

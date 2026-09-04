@@ -8,6 +8,10 @@
     page: 1,
     detail: null,
     myListIds: new Set(),
+    // Capítulos ya vistos de la ficha abierta. Se pide por serie y no de golpe:
+    // el catálogo entero no cabe en una respuesta razonable, y lo único que hay
+    // que tachar en pantalla son los episodios que se están viendo.
+    watchedEpisodeIds: new Set(),
     continueWatching: [],
     heroSlides: [],
     heroIndex: 0,
@@ -96,6 +100,11 @@
       onClose: () => {
         if (!API.getToken()) return;
         refreshContinueWatching(true).catch(() => {});
+        // Terminar un capítulo lo da por visto en el servidor; si la ficha sigue
+        // abierta detrás del reproductor, tiene que salir ya tachado.
+        if (state.detail) {
+          refreshWatchedEpisodes(state.detail.Id).then(rerenderCurrentSeason).catch(() => {});
+        }
       }
     };
   }
@@ -219,6 +228,7 @@
       $('logoutBtn').addEventListener('click', () => {
         API.clearSession();
         state.myListIds.clear();
+        state.watchedEpisodeIds.clear();
         state.continueWatching = [];
         if (state.view === 'mylist') switchView('home');
         refreshAuthUI();
@@ -240,6 +250,22 @@
       state.myListIds.clear();
     }
   }
+
+  async function refreshWatchedEpisodes(seriesId) {
+    if (!API.getToken() || !seriesId) {
+      state.watchedEpisodeIds = new Set();
+      return state.watchedEpisodeIds;
+    }
+    try {
+      const list = await API.watchedBySeries(seriesId);
+      state.watchedEpisodeIds = new Set(list.map((row) => row.EpisodeId));
+    } catch {
+      state.watchedEpisodeIds = new Set();
+    }
+    return state.watchedEpisodeIds;
+  }
+
+  const isWatched = (episodeId) => state.watchedEpisodeIds.has(episodeId);
 
   async function refreshContinueWatching(force = false) {
     if (!API.getToken()) {
@@ -965,6 +991,9 @@
   function setDetailLoadingState(seed = null) {
     state.detail = null;
     state.detailEpisodePages = {};
+    // De la serie anterior; dejarlo tacharía capítulos que no son.
+    state.watchedEpisodeIds = new Set();
+    $('seasonWatchedBar').hidden = true;
     $('detailBg').style.backgroundImage = seed ? `url('${seed.BackdropUrl || seed.PosterUrl || ''}')` : '';
     $('detailTitle').textContent = seed?.Title || 'Cargando...';
     $('detailMeta').textContent = seed
@@ -1030,6 +1059,13 @@
       };
       renderEpisodes(data.seasons[0], 0, 1);
       renderDetailAudioOptions(data, 0);
+
+      // Aparte y sin esperarla: la lista de episodios no depende de esto, y
+      // encadenarla retrasaría la ficha entera por una marca de visto.
+      refreshWatchedEpisodes(data.Id).then(() => {
+        if (state.detailRequestId !== requestId) return;
+        rerenderCurrentSeason();
+      });
 
       $('detailPlay').onclick = () => openPlaybackFromDetail(
         data,
@@ -1100,11 +1136,110 @@
     paginationEl.appendChild(arrow('Siguiente ›', currentPage + 1, currentPage < totalPages));
   }
 
+  function rerenderCurrentSeason() {
+    const seasons = Array.isArray(state.detail?.seasons) ? state.detail.seasons : [];
+    if (!seasons.length) return;
+    const selected = Number($('seasonSelect').value);
+    const index = seasons[selected] ? selected : 0;
+    renderEpisodes(seasons[index], index);
+  }
+
+  function applyWatchedStyles(row, watched) {
+    row.classList.toggle('is-watched', watched);
+    const btn = row.querySelector('.episode-watched');
+    if (!btn) return;
+    btn.classList.toggle('is-on', watched);
+    btn.setAttribute('aria-pressed', watched ? 'true' : 'false');
+    btn.title = watched ? 'Marcar como no visto' : 'Marcar como visto';
+    btn.setAttribute('aria-label', btn.title);
+  }
+
+  async function toggleEpisodeWatched(episode, row, season, seasonIndex) {
+    const watched = !isWatched(episode.Id);
+
+    // Optimista: la marca es un gesto que se repite capítulo a capítulo y
+    // esperar al servidor en cada clic se nota. Si falla, se deshace.
+    if (watched) state.watchedEpisodeIds.add(episode.Id);
+    else state.watchedEpisodeIds.delete(episode.Id);
+    applyWatchedStyles(row, watched);
+    renderSeasonWatchedBar(season, seasonIndex);
+
+    try {
+      if (watched) await API.markWatched(episode.Id);
+      else await API.unmarkWatched(episode.Id);
+      // Dar por visto un capítulo borra su progreso: "Seguir viendo" cambió.
+      lastProgressRefreshAt = 0;
+    } catch (err) {
+      if (watched) state.watchedEpisodeIds.delete(episode.Id);
+      else state.watchedEpisodeIds.add(episode.Id);
+      applyWatchedStyles(row, !watched);
+      renderSeasonWatchedBar(season, seasonIndex);
+      toast(err.message);
+    }
+  }
+
+  async function setSeasonWatched(season, seasonIndex, watched, upToEpisodeNumber = null) {
+    if (!season?.Id) return;
+    try {
+      await API.setSeasonWatched(season.Id, watched, upToEpisodeNumber);
+      (Array.isArray(season.episodes) ? season.episodes : []).forEach((episode) => {
+        if (upToEpisodeNumber != null && episode.EpisodeNumber > upToEpisodeNumber) return;
+        if (watched) state.watchedEpisodeIds.add(episode.Id);
+        else state.watchedEpisodeIds.delete(episode.Id);
+      });
+      lastProgressRefreshAt = 0;
+      renderEpisodes(season, seasonIndex);
+      if (!watched) toast('Marcas quitadas');
+      else if (upToEpisodeNumber != null) toast(`Marcados los capítulos hasta el ${upToEpisodeNumber}`);
+      else toast('Temporada marcada como vista');
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  function renderSeasonWatchedBar(season, seasonIndex) {
+    const bar = $('seasonWatchedBar');
+    const episodes = Array.isArray(season?.episodes) ? season.episodes : [];
+
+    // Sin sesión no hay dónde guardarlo, y en una película no hay temporada que
+    // llevar: ahí basta con la marca de la propia fila.
+    if (!API.getToken() || !episodes.length || state.detail?.ContentType === 'movie') {
+      bar.hidden = true;
+      return;
+    }
+
+    const vistos = episodes.filter((episode) => isWatched(episode.Id)).length;
+    bar.hidden = false;
+    $('seasonWatchedCount').textContent = `${vistos} de ${episodes.length} capítulos vistos`;
+    $('seasonWatchedProgress').style.width = Math.round((vistos / episodes.length) * 100) + '%';
+
+    const todos = $('seasonWatchedAll');
+    const ninguno = $('seasonWatchedNone');
+    todos.disabled = vistos === episodes.length;
+    ninguno.disabled = vistos === 0;
+    todos.onclick = () => setSeasonWatched(season, seasonIndex, true);
+    ninguno.onclick = () => setSeasonWatched(season, seasonIndex, false);
+
+    // Quien llega con media serie vista fuera de la web no va a dar doscientos
+    // clics: dice hasta dónde llegó y se marca de una vez.
+    const hasta = $('seasonWatchedUpTo');
+    hasta.max = String(episodes[episodes.length - 1].EpisodeNumber);
+    $('seasonWatchedUpToBtn').onclick = () => {
+      const numero = Math.trunc(Number(hasta.value));
+      if (!Number.isInteger(numero) || numero < 1) {
+        toast('Escribe el número del capítulo hasta el que llegaste');
+        return;
+      }
+      setSeasonWatched(season, seasonIndex, true, numero);
+    };
+  }
+
   function renderEpisodes(season, seasonIndex = 0, requestedPage = null) {
     const listEl = $('episodeList');
     listEl.innerHTML = '';
     $('detailEpisodePagination').hidden = true;
     if (!season) return;
+    renderSeasonWatchedBar(season, seasonIndex);
 
     const episodes = Array.isArray(season.episodes) ? season.episodes : [];
     const totalPages = Math.max(1, Math.ceil(episodes.length / DETAIL_EPISODES_PAGE_SIZE));
@@ -1117,6 +1252,7 @@
       const row = document.createElement('div');
       row.className = 'episode-row';
       const mins = episode.DurationSec ? Math.round(episode.DurationSec / 60) + ' min' : '';
+      const puedeMarcar = Boolean(API.getToken());
       row.innerHTML = `
         <div class="episode-num">${episode.EpisodeNumber}</div>
         <img class="episode-thumb" src="${episode.ThumbnailUrl || poster(null)}" alt="" loading="lazy" />
@@ -1125,7 +1261,18 @@
           <p>${episode.Description || ''}</p>
         </div>
         <div class="episode-dur">${mins}</div>
+        ${puedeMarcar ? '<button class="episode-watched" type="button">✓</button>' : ''}
         <div class="episode-play">▶</div>`;
+
+      if (puedeMarcar) {
+        applyWatchedStyles(row, isWatched(episode.Id));
+        row.querySelector('.episode-watched').addEventListener('click', (event) => {
+          // La fila entera reproduce: marcar visto no puede abrir el vídeo.
+          event.stopPropagation();
+          toggleEpisodeWatched(episode, row, season, seasonIndex);
+        });
+      }
+
       row.addEventListener('click', () => {
         closeModal(detailModal);
         Player.open(episodes, absoluteIndex, state.detail.Title, {

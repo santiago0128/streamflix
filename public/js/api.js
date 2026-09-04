@@ -60,6 +60,12 @@ const API = (() => {
       method: 'PUT',
       body: { positionSec, durationSec }
     }),
+    watchedBySeries: (seriesId) => req('/watched/series/' + seriesId),
+    markWatched: (episodeId) => req('/watched/' + episodeId, { method: 'PUT' }),
+    unmarkWatched: (episodeId) => req('/watched/' + episodeId, { method: 'DELETE' }),
+    // upToEpisodeNumber null = la temporada entera.
+    setSeasonWatched: (seasonId, watched, upToEpisodeNumber = null) =>
+      req('/watched/season/' + seasonId, { method: 'PUT', body: { watched, upToEpisodeNumber } }),
     myRequests: () => req('/requests'),
     createRequest: (title, contentType, notes) =>
       req('/requests', { method: 'POST', body: { title, contentType, notes } }),
